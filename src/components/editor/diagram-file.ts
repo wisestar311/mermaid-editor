@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DiagramExporter } from "./exporters";
+import { codeFromMarkdown, findMermaidBlocks, markdownFor, replaceMermaidBlock } from "./markdown";
 import { addHistoryEntry } from "./history-pane";
+
+export { codeFromMarkdown, markdownFor } from "./markdown";
 
 export type FileFormat = "mmd" | "md" | "svg" | "png";
 
@@ -42,6 +45,10 @@ export type DiagramFile = {
   /** Writes the diagram as `baseName` in `format`; called by the Save As dialog. */
   saveWith: (baseName: string, format: FileFormat) => Promise<void>;
   open: () => Promise<void>;
+  markdownBlocks: string[];
+  selectedBlock: number;
+  selectBlock: (index: number) => void;
+  detach: () => void;
 };
 
 const isAbort = (error: unknown) => error instanceof DOMException && error.name === "AbortError";
@@ -56,14 +63,6 @@ export function formatFromName(name: string): FileFormat {
 }
 
 export const baseName = (name: string) => name.replace(/\.(mmd|mermaid|md|markdown|txt|svg|png)$/i, "");
-
-/** The first ```mermaid fenced block of a Markdown file, or the whole text when there is none. */
-export function codeFromMarkdown(text: string) {
-  const match = /^```mermaid[^\n]*\n([\s\S]*?)^```/m.exec(text);
-  return match ? match[1] : text;
-}
-
-export const markdownFor = (code: string) => `\`\`\`mermaid\n${code.trimEnd()}\n\`\`\`\n`;
 
 function download(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
@@ -98,7 +97,20 @@ function pickFileWithInput() {
 export function useDiagramFile(code: string, onOpen: (code: string) => void, exportDiagram: DiagramExporter): DiagramFile {
   const [name, setName] = useState<string>();
   const [format, setFormat] = useState<FileFormat>("mmd");
-  const [savedCode, setSavedCode] = useState<string>();
+  const [savedCode, setSavedCode] = useState(code);
+  const markdownRef = useRef<string | null>(null);
+  const [savedDocument, setSavedDocument] = useState<string | null>(null);
+  const [markdownDocument, setMarkdownDocument] = useState<string | null>(null);
+  const [selectedBlock, setSelectedBlock] = useState(0);
+  const selectedBlockRef = useRef(0);
+  const [markdownBlocks, setMarkdownBlocks] = useState<string[]>([]);
+  const updateDocument = useCallback((document: string | null, index = 0) => {
+    markdownRef.current = document;
+    setMarkdownDocument(document);
+    selectedBlockRef.current = index;
+    setSelectedBlock(index);
+    setMarkdownBlocks(document === null ? [] : findMermaidBlocks(document).map((block) => block.code));
+  }, []);
   const [saveAsOpen, setSaveAsOpen] = useState(false);
   const handleRef = useRef<FileSystemFileHandle | null>(null);
   const codeRef = useRef(code);
@@ -110,10 +122,19 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void, exp
     exportRef.current = exportDiagram;
   }, [code, onOpen, exportDiagram]);
 
-  const dirty = savedCode !== undefined && code !== savedCode;
+  const dirty = format === "md" && markdownDocument !== null
+    ? replaceMermaidBlock(markdownDocument, code, selectedBlock) !== savedDocument
+    : code !== savedCode;
   const dirtyRef = useRef(dirty);
   useEffect(() => {
     dirtyRef.current = dirty;
+  }, [dirty]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [dirty]);
 
   const contentFor = useCallback(async (fileFormat: FileFormat, text: string): Promise<Blob> => {
@@ -145,12 +166,15 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void, exp
         setSaveAsOpen(false);
         if (!isEditableFormat(fileFormat)) return;
         handleRef.current = handle;
+        const document = fileFormat === "md" ? markdownFor(text) : null;
+        setSavedDocument(document);
+        updateDocument(document);
         markSaved(handle?.name ?? fileName, fileFormat, text);
       } catch (error) {
         if (!isAbort(error)) window.alert(`저장하지 못했습니다: ${errorMessage(error)}`);
       }
     },
-    [contentFor, markSaved],
+    [contentFor, markSaved, updateDocument],
   );
 
   const saveAs = useCallback(() => setSaveAsOpen(true), []);
@@ -159,9 +183,16 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void, exp
   const save = useCallback(async () => {
     const text = codeRef.current;
     const handle = handleRef.current;
+    const markdown = format === "md" && markdownRef.current !== null
+      ? replaceMermaidBlock(markdownRef.current, text, selectedBlockRef.current) : null;
+    const blob = () => markdown !== null
+      ? Promise.resolve(new Blob([markdown], { type: "text/markdown;charset=utf-8" }))
+      : contentFor(format, text);
     if (handle) {
       try {
-        await writeTo(handle, await contentFor(format, text));
+        await writeTo(handle, await blob());
+        setSavedDocument(markdown);
+        updateDocument(markdown, selectedBlockRef.current);
         markSaved(handle.name, format, text);
       } catch (error) {
         if (!isAbort(error)) window.alert(`저장하지 못했습니다: ${errorMessage(error)}`);
@@ -170,12 +201,14 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void, exp
     }
     // Without file handles a named diagram is downloaded again under the same name.
     if (name && !(window as PickerWindow).showSaveFilePicker) {
-      download(name, await contentFor(format, text));
+      download(name, await blob());
+      setSavedDocument(markdown);
+      updateDocument(markdown, selectedBlockRef.current);
       markSaved(name, format, text);
       return;
     }
     setSaveAsOpen(true);
-  }, [name, format, contentFor, markSaved]);
+  }, [name, format, contentFor, markSaved, updateDocument]);
 
   const open = useCallback(async () => {
     if (dirtyRef.current && !window.confirm("저장하지 않은 변경 사항이 있습니다. 다른 파일을 열까요?")) return;
@@ -194,6 +227,9 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void, exp
       const text = await file.text();
       const opened = fileFormat === "md" ? codeFromMarkdown(text) : text;
       handleRef.current = handle;
+      const document = fileFormat === "md" ? text : null;
+      setSavedDocument(document);
+      updateDocument(document);
       setName(file.name);
       setFormat(fileFormat);
       setSavedCode(opened);
@@ -201,7 +237,24 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void, exp
     } catch (error) {
       if (!isAbort(error)) window.alert(`파일을 열지 못했습니다: ${errorMessage(error)}`);
     }
-  }, []);
+  }, [updateDocument]);
+
+  const selectBlock = useCallback((index: number) => {
+    if (markdownRef.current === null || index === selectedBlockRef.current) return;
+    const document = replaceMermaidBlock(markdownRef.current, codeRef.current, selectedBlockRef.current);
+    const block = findMermaidBlocks(document)[index];
+    if (!block) return;
+    updateDocument(document, index);
+    onOpenRef.current(block.code);
+  }, [updateDocument]);
+
+  const detach = () => {
+    handleRef.current = null;
+    setSavedDocument(null);
+    updateDocument(null);
+    setName(undefined);
+    setFormat("mmd");
+  };
 
   // ⌘S / Ctrl+S, ⇧⌘S and ⌘O, captured before Monaco sees them.
   useEffect(() => {
@@ -223,7 +276,7 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void, exp
     return () => window.removeEventListener("keydown", onKey, true);
   }, [save, saveAs, open]);
 
-  return { name, format, dirty, save, saveAs, saveAsOpen, closeSaveAs, saveWith, open };
+  return { name, format, dirty, save, saveAs, saveAsOpen, closeSaveAs, saveWith, open, markdownBlocks, selectedBlock, selectBlock, detach };
 }
 
 /** Shortcut prefix for menu hints: ⌘ on Apple platforms, Ctrl+ elsewhere. */

@@ -4,9 +4,13 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Pointe
 
 import { cn } from "@/lib/utils";
 
+import { LibraryDialog } from "./library-dialog";
+import { QuickInsert } from "./quick-insert-panel";
+import { OfflineStatus } from "./offline-status";
+
 import { DiagramView, type DiagramController } from "./diagram-view";
 import { useDiagramFile } from "./diagram-file";
-import { HistoryPane, useAutoSave } from "./history-pane";
+import { HistoryPane, useAutoSave, addHistoryEntry } from "./history-pane";
 import {
   CodeIcon,
   ExpandIcon,
@@ -32,6 +36,7 @@ import {
   buildUrls,
   loadInitialState,
   persistState,
+  parseConfig,
   serializeState,
   type EditorMode,
   type LiveState,
@@ -84,6 +89,7 @@ export function LiveEditor() {
   const viewPaneRef = useRef<HTMLDivElement>(null);
 
   const [state, setState] = useState<LiveState>(loadInitialState);
+  const [documentRevision, setDocumentRevision] = useState(0);
   const [parse, setParse] = useState<ParseResult | null>(null);
   // Only code that passed mermaid.parse reaches the view, like mermaid.live's validated state.
   const [validCode, setValidCode] = useState<string>();
@@ -95,6 +101,7 @@ export function LiveEditor() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [leftSize, setLeftSize] = useState(() => Number(readStorage(PANES_KEY)) || 30);
   const [historySize, setHistorySize] = useState(30);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -138,15 +145,15 @@ export function LiveEditor() {
   }, []);
 
 
-  const configValid = useMemo(() => {
+  const configError = useMemo(() => {
     try {
-      JSON.parse(state.mermaid);
-      return true;
-    } catch {
-      return false;
+      parseConfig(state.mermaid);
+      return undefined;
+    } catch (error) {
+      return error instanceof Error ? error.message : "설정 JSON이 올바르지 않습니다";
     }
   }, [state.mermaid]);
-  const hasError = (parse !== null && "error" in parse) || !configValid;
+  const hasError = (parse !== null && "error" in parse) || configError !== undefined;
   const editorError = useMemo(
     () => (parse && "error" in parse ? { message: parse.error, line: parse.line } : undefined),
     [parse],
@@ -167,7 +174,7 @@ export function LiveEditor() {
   };
 
 
-  const effectiveLeft = isMobile ? 50 : leftSize;
+  const effectiveLeft = isMobile ? 50 : Math.min(leftSize, 100 - MIN_PANE - (historyOpen ? historySize : 0));
   const showHistory = historyOpen && !isMobile;
   const middleSize = 100 - effectiveLeft - (showHistory ? historySize : 0);
 
@@ -201,9 +208,14 @@ export function LiveEditor() {
   };
 
   // Loading a sample or history entry starts from a freshly fitted view.
-  const loadCode = (code: string) => update({ code, updateDiagram: true, pan: undefined, zoom: undefined });
+  const loadCode = (code: string) => {
+    setDocumentRevision((value) => value + 1);
+    if (code !== state.code) addHistoryEntry(state.code, "auto");
+    update({ code, updateDiagram: true, pan: undefined, zoom: undefined });
+  };
 
   const withCleanSvg: WithCleanSvg = async (run) => {
+    if (hasError || validCode !== state.code) throw new Error("코드와 설정의 오류를 수정한 뒤 이미지를 내보내세요.");
     setExporting(true);
     try {
       // Pan/zoom transforms must be gone before the SVG is serialized or rasterized.
@@ -236,11 +248,13 @@ export function LiveEditor() {
         historyOpen={historyOpen}
         onHistoryChange={setHistoryOpen}
         onShare={() => setShareOpen(true)}
+        onLibrary={() => setLibraryOpen(true)}
         newHref={urls.newDiagram}
         dark={dark}
         onToggleDark={toggleDark}
         file={file}
       />
+      <OfflineStatus />
       <div ref={layoutRef} className="flex flex-1 flex-col overflow-hidden">
         <div
           className={cn(
@@ -251,7 +265,7 @@ export function LiveEditor() {
         >
           <div ref={groupRef} className="flex h-full w-full gap-4 overflow-hidden p-2 pt-0 sm:gap-0 sm:p-6 sm:pt-0">
             <div className="overflow-hidden" style={{ flex: `${effectiveLeft} 1 0px` }}>
-              <div className="flex h-full flex-col gap-4 sm:gap-6">
+              <div className="flex h-full flex-col gap-4 overflow-y-auto sm:gap-6 [&>div:first-child]:shrink-0">
                 <Card
                   isOpen
                   header={
@@ -285,17 +299,35 @@ export function LiveEditor() {
                       </ul>
                     </div>
                   }
-                  bodyClassName="relative"
+                  bodyClassName="relative min-h-[26rem]"
                 >
-                  <div className="absolute inset-0">
-                    <MonacoEditor
+                  <div className="absolute inset-0 flex flex-col">
+                    {file.markdownBlocks.length > 0 && (
+                      <label className="flex shrink-0 items-center gap-2 p-2 text-xs">
+                        문서 속 다이어그램
+                        <select aria-label="Markdown 다이어그램 선택" className="min-w-0 grow rounded border bg-(--ml-background) p-2" value={file.selectedBlock} onChange={(event) => file.selectBlock(Number(event.target.value))}>
+                          {file.markdownBlocks.map((code, index) => <option key={index} value={index}>{index + 1}. {code.trim().split("\n")[0].slice(0, 60)}</option>)}
+                        </select>
+                      </label>
+                    )}
+                    <div className="min-h-20 flex-1 overflow-hidden">
+                    {isMobile ? <textarea
+                      aria-label={editorMode === "code" ? "Mermaid 코드" : "Mermaid 설정"}
+                      spellCheck={false} autoCapitalize="off" autoCorrect="off"
+                      className="h-full w-full resize-none bg-transparent p-3 font-mono text-base outline-none"
+                      value={editorMode === "code" ? state.code : state.mermaid}
+                      onChange={(event) => update(editorMode === "code" ? { code: event.target.value } : { mermaid: event.target.value })}
+                    /> : <MonacoEditor
                       mode={editorMode}
+                      revision={documentRevision}
                       code={state.code}
                       config={state.mermaid}
                       dark={dark}
                       error={editorError}
                       onChange={(mode, value) => update(mode === "code" ? { code: value } : { mermaid: value })}
-                    />
+                    />}
+                    </div>
+                    {editorMode === "code" && <QuickInsert code={state.code} onChange={(code) => update({ code })} />}
                   </div>
                 </Card>
                 <div className="group flex flex-wrap justify-between gap-4 sm:gap-6">
@@ -328,6 +360,11 @@ export function LiveEditor() {
                 hasError={hasError}
                 controllerRef={controllerRef}
               />
+              {configError && (
+                <p role="alert" className="absolute top-16 right-2 left-2 rounded-lg bg-(--ml-background) p-3 text-sm text-red-600">
+                  설정 오류: {configError}
+                </p>
+              )}
               <div className="absolute top-0 right-0">
                 <FloatingToolbar>
                   <Button variant="ghost" size="icon" title="보기 초기화" onClick={() => controllerRef.current?.reset()}>
@@ -391,6 +428,13 @@ export function LiveEditor() {
           </div>
         </div>
       </div>
+      {libraryOpen && <LibraryDialog state={state} onClose={() => setLibraryOpen(false)} onLoad={(saved) => {
+        if (file.dirty && !window.confirm("저장하지 않은 파일 변경 사항이 있습니다. 보관함의 다이어그램을 열까요?")) return;
+        addHistoryEntry(state.code, "auto");
+        file.detach();
+        setDocumentRevision((value) => value + 1);
+        update({ ...saved, pan: undefined, zoom: undefined, editorMode: "code" });
+      }} />}
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} code={state.code} exportDiagram={exportDiagram} />
       <SaveAsDialog file={file} />
       <PrivacyDialog open={privacyOpen} onClose={() => setPrivacyOpen(false)} />

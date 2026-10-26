@@ -26,15 +26,19 @@ type MainMenuProps = {
   dark: boolean;
   onToggleDark: () => void;
   file: DiagramFile;
+  onShare: () => void;
+  onLibrary: () => void;
 };
 
-function MainMenu({ newHref, dark, onToggleDark, file }: MainMenuProps) {
+function MainMenu({ newHref, dark, onToggleDark, file, onShare, onLibrary }: MainMenuProps) {
   const entries: MenuEntry[] = [
+    { label: "보관함", icon: <FolderOpen />, onClick: onLibrary },
     { label: "새로 만들기", icon: <Plus />, href: newHref, newTab: true },
     { label: "복제", icon: <Copy />, href: typeof window === "undefined" ? "#" : window.location.href, newTab: true },
     { label: "열기", icon: <FolderOpen />, onClick: () => void file.open() },
     { label: "저장", icon: <Save />, onClick: () => void file.save() },
     { label: "다른 이름으로 저장", icon: <SaveAll />, onClick: file.saveAs, sectionEnd: true },
+    { label: "공유", icon: <Users />, onClick: onShare },
     { label: "Mermaid.js", icon: <MermaidIcon />, href: "https://mermaid.js.org", newTab: true },
     { label: "커뮤니티", icon: <Users />, href: "https://discord.gg/sKeNQX4Wtj", newTab: true },
     { label: "다크 모드", icon: <Contrast />, onClick: onToggleDark, isDarkToggle: true },
@@ -125,7 +129,7 @@ export function Navbar({ isMobile, isViewMode, onViewModeChange, historyOpen, on
   return (
     <nav className="z-50 flex p-4 sm:p-6">
       <div className="flex flex-1 items-center gap-2">
-        <MainMenu {...menu} />
+        <MainMenu {...menu} onShare={onShare} />
         <MermaidIcon className="size-6" />
         <Link href="/" className="whitespace-nowrap text-(--ml-accent)">
           Mermaid 에디터
@@ -158,6 +162,7 @@ export function Navbar({ isMobile, isViewMode, onViewModeChange, historyOpen, on
             ))
           }
         </Popover>
+        <Button size="sm" variant="ghost" onClick={menu.onLibrary}>보관함</Button>
         <Separator />
         <Toggle pressed={historyOpen} onPressedChange={onHistoryChange} title="기록" aria-label="기록">
           <HistoryIcon />
@@ -255,8 +260,9 @@ export function PrivacyDialog({ open, onClose }: { open: boolean; onClose: () =>
         <ShieldCheck className="size-8 text-green-700" />
         데이터 보안
       </h2>
-      <p className="text-xl font-semibold">다이어그램은 브라우저 밖으로 나가지 않습니다.</p>
-      <p>이 에디터는 다이어그램을 페이지 URL과 브라우저의 로컬 저장소에만 보관합니다.</p>
+      <p className="text-xl font-semibold">편집과 파일 저장은 브라우저 안에서 처리합니다.</p>
+      <p>이 에디터는 다이어그램을 페이지 URL과 브라우저의 로컬 저장소에 보관합니다. 공유 링크에는 다이어그램 코드와 설정이 포함되므로 링크를 받은 사람이 내용을 볼 수 있습니다.</p>
+      <p>mermaid.ink·Kroki 외부 렌더러를 열거나 외부 이미지가 포함된 마크다운을 사용하면 해당 서비스로 다이어그램이 전송됩니다. Gist 불러오기는 GitHub에 연결하며, 아이콘 글꼴은 CDN에서 불러옵니다.</p>
       <p>
         이 앱은 오픈소스 Mermaid Live Editor(MIT)를 바탕으로 만들었습니다:{" "}
         <a className="underline" href="https://github.com/mermaid-js/mermaid-live-editor" target="_blank" rel="noreferrer">

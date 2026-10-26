@@ -164,6 +164,14 @@ export function ActionsCard({ withCleanSvg, urls, onLoadCode }: ActionsCardProps
   const [gistUrl, setGistUrl] = useState("");
   const [gistStatus, setGistStatus] = useState("");
 
+  const runExport = async (action: () => Promise<void>) => {
+    try {
+      await action();
+    } catch (error) {
+      window.alert(`내보내지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const exportPng = () =>
     withCleanSvg(async (svg, background) => canvasToBlob(await rasterize(svg, background, { mode: sizeMode, value: imageSize })));
 
@@ -243,14 +251,14 @@ export function ActionsCard({ withCleanSvg, urls, onLoadCode }: ActionsCardProps
           />
         </div>
         <div className="flex gap-2">
-          <DualAction label="PNG" onClick={() => void downloadPng()} href={urls.png} />
-          <DualAction label="SVG" onClick={() => void downloadSvg()} href={urls.svg} />
+          <DualAction label="PNG" onClick={() => void runExport(downloadPng)} href={urls.png} />
+          <DualAction label="SVG" onClick={() => void runExport(downloadSvg)} href={urls.svg} />
           <LinkButton className="grow" href={urls.kroki} target="_blank" rel="noreferrer">
             <ExternalLinkIcon /> Kroki
           </LinkButton>
         </div>
         <div className="h-px w-full bg-(--ml-border)" role="separator" />
-        <Button onClick={() => void copyImage()}>
+        <Button onClick={() => void runExport(copyImage)}>
           <CopyIcon />
           이미지 복사
         </Button>

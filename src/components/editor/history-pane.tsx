@@ -16,7 +16,13 @@ const AUTO_SAVE_DELAY = 5000;
 
 function readHistory(): HistoryEntry[] {
   try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]") as HistoryEntry[];
+    const value: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is HistoryEntry =>
+      entry !== null && typeof entry === "object" && typeof entry.id === "string" &&
+      typeof entry.time === "number" && Number.isFinite(entry.time) && typeof entry.code === "string" &&
+      (entry.type === "auto" || entry.type === "manual"),
+    );
   } catch {
     return [];
   }

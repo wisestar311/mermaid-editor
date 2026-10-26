@@ -1,5 +1,7 @@
 // Browser-only mermaid setup matching mermaid.live: tidy-tree layouts, ZenUML,
 // and the editor-managed theme rules (MIT, mermaid-js/mermaid-live-editor).
+import { parseConfig } from "./state";
+
 import tidyTreeLayouts from "@mermaid-js/layout-tidy-tree";
 import zenuml from "@mermaid-js/mermaid-zenuml";
 import mermaid, { type MermaidConfig } from "mermaid";
@@ -56,7 +58,7 @@ for (const theme of [globalDefaultTheme, ...Object.values(defaultConfig).map(the
 export function syncManagedTheme(configText: string, diagramType: string, dark: boolean) {
   let config: MermaidConfig;
   try {
-    config = JSON.parse(configText) as MermaidConfig;
+    config = parseConfig(configText) as MermaidConfig;
   } catch {
     return configText;
   }
@@ -89,7 +91,7 @@ let renderCount = 0;
 
 export async function renderDiagram(code: string, config: MermaidConfig) {
   await ready;
-  mermaid.initialize({ ...config, startOnLoad: false });
+  mermaid.initialize({ ...config, startOnLoad: false, securityLevel: "strict" });
   renderCount += 1;
   const id = `graph-${renderCount}`;
   const result = await mermaid.render(id, code);

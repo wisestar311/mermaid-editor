@@ -24,7 +24,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run lint && npm run typecheck
+      - run: npm run lint && npm run typecheck && npm test
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}

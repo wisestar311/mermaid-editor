@@ -55,6 +55,34 @@ export function serializeState(state: LiveState) {
   return `pako:${pakoSerialize(JSON.stringify(state))}`;
 }
 
+/** Accept only the expected fields from shared links and local storage. */
+export function normalizeState(value: unknown): LiveState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("잘못된 다이어그램 상태입니다.");
+  const input = value as Record<string, unknown>;
+  const state = { ...defaultState };
+  for (const key of ["code", "mermaid"] as const) {
+    if (typeof input[key] === "string") state[key] = input[key];
+  }
+  for (const key of ["grid", "panZoom", "rough", "updateDiagram"] as const) {
+    if (typeof input[key] === "boolean") state[key] = input[key];
+  }
+  if (input.editorMode === "code" || input.editorMode === "config") state.editorMode = input.editorMode;
+  if (typeof input.zoom === "number" && Number.isFinite(input.zoom) && input.zoom > 0) state.zoom = input.zoom;
+  const pan = input.pan as { x?: unknown; y?: unknown } | null;
+  if (pan && typeof pan.x === "number" && typeof pan.y === "number" && Number.isFinite(pan.x) && Number.isFinite(pan.y)) {
+    state.pan = { x: pan.x, y: pan.y };
+  }
+  return state;
+}
+
+export function parseConfig(text: string): Record<string, unknown> {
+  const config: unknown = JSON.parse(text);
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("설정은 JSON 객체여야 합니다. 예: {}");
+  }
+  return config as Record<string, unknown>;
+}
+
 export function deserializeState(serialized: string): LiveState {
   const [type, data] = serialized.includes(":") ? serialized.split(":") : ["base64", serialized];
   let json: string;
@@ -65,7 +93,7 @@ export function deserializeState(serialized: string): LiveState {
   } else {
     throw new Error(`Unknown serde type: ${type}`);
   }
-  return { ...defaultState, ...(JSON.parse(json) as Partial<LiveState>) };
+  return normalizeState(JSON.parse(json));
 }
 
 const STORE_KEY = "mermaid-editor:codeStore";
@@ -81,7 +109,7 @@ export function loadInitialState(): LiveState {
   }
   try {
     const stored = localStorage.getItem(STORE_KEY);
-    if (stored) return { ...defaultState, ...(JSON.parse(stored) as Partial<LiveState>) };
+    if (stored) return normalizeState(JSON.parse(stored));
   } catch {
     // Storage can be unavailable (private mode); fall back to the default diagram.
   }
@@ -90,7 +118,11 @@ export function loadInitialState(): LiveState {
 
 export function persistState(state: LiveState) {
   const serialized = serializeState(state);
-  window.history.replaceState(null, "", `#${serialized}`);
+  try {
+    window.history.replaceState(null, "", `#${serialized}`);
+  } catch {
+    // Browser URL limits must not prevent the local backup.
+  }
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(state));
   } catch {

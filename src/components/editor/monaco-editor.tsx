@@ -13,6 +13,7 @@ type MonacoEditorProps = {
   code: string;
   config: string;
   dark: boolean;
+  revision: number;
   error?: { message: string; line?: number };
   onChange: (mode: EditorMode, value: string) => void;
 };
@@ -50,7 +51,7 @@ function loadMonaco() {
 
 type EditorParts = { monaco: Monaco; editor: StandaloneEditor; models: Record<EditorMode, TextModel> };
 
-export function MonacoEditor({ mode, code, config, dark, error, onChange }: MonacoEditorProps) {
+export function MonacoEditor({ mode, code, config, dark, revision, error, onChange }: MonacoEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const partsRef = useRef<EditorParts | null>(null);
   const [ready, setReady] = useState(false);
@@ -59,6 +60,7 @@ export function MonacoEditor({ mode, code, config, dark, error, onChange }: Mona
   // older one of these back; only values the editor never produced are outside edits.
   const reportedRef = useRef<Record<EditorMode, Set<string>>>({ code: new Set(), config: new Set() });
   const syncingRef = useRef(false);
+  const revisionRef = useRef(revision);
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -118,6 +120,11 @@ export function MonacoEditor({ mode, code, config, dark, error, onChange }: Mona
     const parts = partsRef.current;
     if (!ready || !parts) return;
     const { editor, models } = parts;
+    if (revisionRef.current !== revision) {
+      reportedRef.current.code.clear();
+      reportedRef.current.config.clear();
+      revisionRef.current = revision;
+    }
     const model = models[mode];
     if (editor.getModel() !== model) editor.setModel(model);
     const next = mode === "code" ? code : config;
@@ -133,7 +140,7 @@ export function MonacoEditor({ mode, code, config, dark, error, onChange }: Mona
         syncingRef.current = false;
       }
     }
-  }, [ready, mode, code, config]);
+  }, [ready, mode, code, config, revision]);
 
   useEffect(() => {
     const parts = partsRef.current;
