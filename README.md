@@ -13,8 +13,13 @@ npm start        # out/ 폴더를 로컬에서 서빙
 npm run check    # lint + 타입 검사 + 빌드
 ```
 
-`out/` 폴더를 그대로 올리면 어떤 정적 호스팅(GitHub Pages, Netlify, Vercel, S3 등)에서도 동작합니다.
-사이트 루트(`/`)에 올리는 것을 전제로 하며, 하위 경로에 올리려면 `next.config.ts`에 `basePath`를 지정하세요.
+`out/` 폴더를 그대로 올리면 어떤 정적 호스팅(Netlify, Vercel, S3 등)에서도 동작합니다.
+하위 경로에 올릴 때는 `BASE_PATH=/경로 npm run build`로 빌드하세요.
+
+## 배포
+
+`main`에 푸시하면 GitHub Actions(`.github/workflows/deploy.yml`)가 lint·타입 검사·빌드를 거쳐
+GitHub Pages에 배포합니다: https://wisestar311.github.io/mermaid-editor/
 
 ## 기능
 
@@ -42,5 +47,5 @@ npm run check    # lint + 타입 검사 + 빌드
 | `src/components/editor/share-dialog.tsx` | 공유 창 |
 | `src/components/editor/exporters.ts` | SVG·PNG 생성 (내보내기·저장·공유 공용) |
 | `src/components/editor/ko.ts` | 샘플 다이어그램 이름 번역 |
-| `public/fonts/` | Recursive(OFL), Pretendard(OFL, 라이선스 포함) |
+| `src/components/editor/fonts/` | Recursive(OFL), Pretendard(OFL, 라이선스 포함) |
 | `docs/UPSTREAM-LICENSE-mermaid-live-editor.txt` | 원본 에디터의 MIT 라이선스 |
