@@ -8,7 +8,6 @@ import { DiagramView, type DiagramController } from "./diagram-view";
 import { useDiagramFile } from "./diagram-file";
 import { HistoryPane, useAutoSave } from "./history-pane";
 import {
-  BookIcon,
   CodeIcon,
   ExpandIcon,
   GearIcon,
@@ -23,19 +22,21 @@ import {
 } from "./icons";
 import { parseDiagram, syncManagedTheme, type ParseResult } from "./mermaid-runtime";
 import { MonacoEditor } from "./monaco-editor";
-import { Navbar, PrivacyDialog, ShareDialog } from "./navbar";
+import { createExporter, type WithCleanSvg } from "./exporters";
+import { Navbar, PrivacyDialog } from "./navbar";
 import { ActionsCard, SamplesCard } from "./panels";
+import { SaveAsDialog } from "./save-as-dialog";
+import { ShareDialog } from "./share-dialog";
 import {
   MERMAID_VERSION,
   buildUrls,
-  getDocs,
   loadInitialState,
   persistState,
   serializeState,
   type EditorMode,
   type LiveState,
 } from "./state";
-import { Button, Card, FloatingToolbar, LinkButton, Separator, Toggle } from "./ui";
+import { Button, Card, FloatingToolbar, Separator, Toggle } from "./ui";
 
 import "./pretendard.css";
 import "./mermaid-live.css";
@@ -84,7 +85,6 @@ export function LiveEditor() {
 
   const [state, setState] = useState<LiveState>(loadInitialState);
   const [parse, setParse] = useState<ParseResult | null>(null);
-  const [diagramType, setDiagramType] = useState<string>();
   // Only code that passed mermaid.parse reaches the view, like mermaid.live's validated state.
   const [validCode, setValidCode] = useState<string>();
   const [mode, setMode] = useState<Mode>(() => (readStorage(MODE_KEY) as Mode | null) ?? "system");
@@ -103,7 +103,6 @@ export function LiveEditor() {
   const editorMode = state.editorMode ?? "code";
   const serialized = useMemo(() => serializeState(state), [state]);
   const urls = useMemo(() => buildUrls(state, serialized), [state, serialized]);
-  const docs = getDocs(diagramType, editorMode);
 
   useEffect(() => {
     persistState(state);
@@ -118,7 +117,6 @@ export function LiveEditor() {
       if (cancelled) return;
       setParse(result);
       if ("diagramType" in result) {
-        setDiagramType(result.diagramType);
         setValidCode(state.code);
         setState((current) => {
           const mermaid = syncManagedTheme(current.mermaid, result.diagramType, dark);
@@ -204,7 +202,25 @@ export function LiveEditor() {
 
   // Loading a sample or history entry starts from a freshly fitted view.
   const loadCode = (code: string) => update({ code, updateDiagram: true, pan: undefined, zoom: undefined });
-  const file = useDiagramFile(state.code, loadCode);
+
+  const withCleanSvg: WithCleanSvg = async (run) => {
+    setExporting(true);
+    try {
+      // Pan/zoom transforms must be gone before the SVG is serialized or rasterized.
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      await controllerRef.current?.whenRendered();
+      const svg = controllerRef.current?.getSvg();
+      if (!svg) throw new Error("다이어그램이 아직 그려지지 않았습니다");
+      const background = rootRef.current
+        ? getComputedStyle(rootRef.current).getPropertyValue("--ml-background").trim()
+        : "#fff";
+      return await run(svg, background);
+    } finally {
+      setExporting(false);
+    }
+  };
+  const exportDiagram = createExporter(withCleanSvg);
+  const file = useDiagramFile(state.code, loadCode, exportDiagram);
 
   return (
     <div
@@ -269,18 +285,6 @@ export function LiveEditor() {
                       </ul>
                     </div>
                   }
-                  actions={
-                    <LinkButton
-                      variant="ghost"
-                      href={docs.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={docs.label === "config" ? "설정 문서 보기" : `${docs.label} 다이어그램 문서 보기`}
-                    >
-                      <BookIcon />
-                      문서
-                    </LinkButton>
-                  }
                   bodyClassName="relative"
                 >
                   <div className="absolute inset-0">
@@ -297,11 +301,7 @@ export function LiveEditor() {
                 <div className="group flex flex-wrap justify-between gap-4 sm:gap-6">
                   <SamplesCard onLoad={loadCode} />
                   <ActionsCard
-                    controllerRef={controllerRef}
-                    setExporting={setExporting}
-                    backgroundColor={() =>
-                      rootRef.current ? getComputedStyle(rootRef.current).getPropertyValue("--ml-background").trim() : "#fff"
-                    }
+                    withCleanSvg={withCleanSvg}
                     urls={urls}
                     onLoadCode={loadCode}
                   />
@@ -391,7 +391,8 @@ export function LiveEditor() {
           </div>
         </div>
       </div>
-      <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} />
+      <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} code={state.code} exportDiagram={exportDiagram} />
+      <SaveAsDialog file={file} />
       <PrivacyDialog open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
     </div>
   );

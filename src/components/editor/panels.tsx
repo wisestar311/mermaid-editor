@@ -1,11 +1,11 @@
 "use client";
 
 import { diagramData } from "@mermaid-js/examples";
-import { useState, type RefObject } from "react";
+import { useState } from "react";
 
 import { cn } from "@/lib/utils";
 
-import type { DiagramController } from "./diagram-view";
+import { canvasToBlob, rasterize, svgMarkup, type WithCleanSvg } from "./exporters";
 import { exampleTitle, sampleName } from "./ko";
 import { ChevronDownIcon, CopyIcon, DownloadIcon, ExternalLinkIcon, ShapesIcon } from "./icons";
 import { Button, Card, CopyInput, LinkButton, Popover, buttonClasses } from "./ui";
@@ -123,14 +123,10 @@ type ImageSizeMode = "auto" | "width" | "height";
 const sizeModeLabels: Record<ImageSizeMode, string> = { auto: "자동", width: "너비", height: "높이" };
 
 type ActionsCardProps = {
-  controllerRef: RefObject<DiagramController | null>;
-  setExporting: (exporting: boolean) => void;
-  backgroundColor: () => string;
+  withCleanSvg: WithCleanSvg;
   urls: { png: string; svg: string; kroki: string; mdCode: string };
   onLoadCode: (code: string) => void;
 };
-
-const FONT_AWESOME_URL = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css";
 
 function fileName(extension: string) {
   const now = new Date();
@@ -147,27 +143,6 @@ function simulateDownload(download: string, href: string) {
   anchor.remove();
 }
 
-function toBase64(text: string) {
-  const bytes = new TextEncoder().encode(text);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function svgToBase64(svg: SVGSVGElement, background: string, width?: number, height?: number) {
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-  if (height) clone.setAttribute("height", `${height}px`);
-  if (width) clone.setAttribute("width", `${width}px`);
-  clone.style.backgroundColor = background;
-  const markup = clone.outerHTML
-    .replaceAll("<br>", "<br/>")
-    .replaceAll(/<img([^>]*)>/g, (_match, attributes: string) => `<img ${attributes} />`);
-  return toBase64(`<?xml version="1.0" encoding="UTF-8"?>
-<?xml-stylesheet href="${FONT_AWESOME_URL}" type="text/css"?>
-${markup}`);
-}
-
 function DualAction({ label, onClick, href }: { label: string; onClick: () => void; href: string }) {
   return (
     <div className="flex grow gap-0.5">
@@ -182,73 +157,33 @@ function DualAction({ label, onClick, href }: { label: string; onClick: () => vo
   );
 }
 
-export function ActionsCard({ controllerRef, setExporting, backgroundColor, urls, onLoadCode }: ActionsCardProps) {
+export function ActionsCard({ withCleanSvg, urls, onLoadCode }: ActionsCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [sizeMode, setSizeMode] = useState<ImageSizeMode>("auto");
   const [imageSize, setImageSize] = useState(1080);
   const [gistUrl, setGistUrl] = useState("");
   const [gistStatus, setGistStatus] = useState("");
 
-  const exportImage = async (exporter: (canvas: HTMLCanvasElement, image: HTMLImageElement) => void) => {
-    setExporting(true);
-    // Pan/zoom transforms must be gone before the SVG is rasterized.
-    await new Promise((resolve) => window.setTimeout(resolve, 300));
-    await controllerRef.current?.whenRendered();
-    const svg = controllerRef.current?.getSvg();
-    if (!svg) {
-      setExporting(false);
-      return;
-    }
-    const box = svg.getBoundingClientRect();
-    const viewBox = svg.viewBox?.baseVal;
-    const contentWidth = viewBox && viewBox.width > 0 ? viewBox.width : box.width;
-    const contentHeight = viewBox && viewBox.height > 0 ? viewBox.height : box.height;
-    const canvas = document.createElement("canvas");
-    if (sizeMode === "width") {
-      canvas.width = imageSize;
-      canvas.height = imageSize * (contentHeight / contentWidth);
-    } else if (sizeMode === "height") {
-      canvas.width = imageSize * (contentWidth / contentHeight);
-      canvas.height = imageSize;
-    } else {
-      canvas.width = contentWidth * 2;
-      canvas.height = contentHeight * 2;
-    }
-    const context = canvas.getContext("2d");
-    if (!context) {
-      setExporting(false);
-      return;
-    }
-    const background = backgroundColor();
-    context.fillStyle = background;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    const image = new Image();
-    image.addEventListener("load", () => {
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      exporter(canvas, image);
-      setExporting(false);
-    });
-    image.addEventListener("error", () => setExporting(false));
-    image.src = `data:image/svg+xml;base64,${svgToBase64(svg, background, canvas.width, canvas.height)}`;
+  const exportPng = () =>
+    withCleanSvg(async (svg, background) => canvasToBlob(await rasterize(svg, background, { mode: sizeMode, value: imageSize })));
+
+  const downloadPng = async () => {
+    const blob = await exportPng();
+    const url = URL.createObjectURL(blob);
+    simulateDownload(fileName("png"), url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const downloadPng = () =>
-    exportImage((canvas) => {
-      simulateDownload(fileName("png"), canvas.toDataURL("image/png").replace("image/png", "image/octet-stream"));
-    });
+  const copyImage = async () => {
+    // Safari only allows clipboard writes started synchronously, so hand it the pending blob.
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": exportPng() })]);
+  };
 
-  const copyImage = () =>
-    exportImage((canvas) => {
-      canvas.toBlob((blob) => {
-        if (!blob) return;
-        void navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-      });
-    });
-
-  const downloadSvg = () => {
-    const svg = controllerRef.current?.getSvg();
-    if (!svg) return;
-    simulateDownload(fileName("svg"), `data:image/svg+xml;base64,${svgToBase64(svg, backgroundColor())}`);
+  const downloadSvg = async () => {
+    const markup = await withCleanSvg(async (svg, background) => svgMarkup(svg, background));
+    const url = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml" }));
+    simulateDownload(fileName("svg"), url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const loadGist = async () => {
@@ -309,7 +244,7 @@ export function ActionsCard({ controllerRef, setExporting, backgroundColor, urls
         </div>
         <div className="flex gap-2">
           <DualAction label="PNG" onClick={() => void downloadPng()} href={urls.png} />
-          <DualAction label="SVG" onClick={downloadSvg} href={urls.svg} />
+          <DualAction label="SVG" onClick={() => void downloadSvg()} href={urls.svg} />
           <LinkButton className="grow" href={urls.kroki} target="_blank" rel="noreferrer">
             <ExternalLinkIcon /> Kroki
           </LinkButton>

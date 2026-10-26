@@ -19,7 +19,6 @@ export type LiveState = {
 export const MERMAID_VERSION = "12.2.0";
 const RENDERER_URL = "https://mermaid.ink";
 const KROKI_URL = "https://kroki.io";
-const DOCS_URL = "https://mermaid.js.org";
 
 export const defaultState: LiveState = {
   code: `flowchart TD
@@ -109,45 +108,4 @@ export function buildUrls(state: LiveState, serialized: string) {
     mdCode: `[![](${png})](${window.location.href})`,
     newDiagram: `${window.location.pathname}#${serializeState(defaultState)}`,
   };
-}
-
-
-// mermaid's detector ids → documentation page and Docs-button label.
-const docPages: Record<string, [page: string, label: string]> = {
-  "flowchart-v2": ["flowchart", "flowchart"],
-  flowchart: ["flowchart", "flowchart"],
-  "flowchart-elk": ["flowchart", "flowchart"],
-  sequence: ["sequenceDiagram", "sequence"],
-  class: ["classDiagram", "class"],
-  classDiagram: ["classDiagram", "class"],
-  state: ["stateDiagram", "state"],
-  stateDiagram: ["stateDiagram", "state"],
-  er: ["entityRelationshipDiagram", "er"],
-  journey: ["userJourney", "journey"],
-  gantt: ["gantt", "gantt"],
-  pie: ["pie", "pie"],
-  quadrantChart: ["quadrantChart", "quadrantChart"],
-  requirement: ["requirementDiagram", "requirement"],
-  gitGraph: ["gitgraph", "gitGraph"],
-  c4: ["c4", "c4"],
-  mindmap: ["mindmap", "mindmap"],
-  timeline: ["timeline", "timeline"],
-  sankey: ["sankey", "sankey"],
-  xychart: ["xyChart", "xychart"],
-  block: ["block", "block"],
-  packet: ["packet", "packet"],
-  kanban: ["kanban", "kanban"],
-  architecture: ["architecture", "architecture"],
-  radar: ["radar", "radar"],
-  treemap: ["treemap", "treemap"],
-  zenuml: ["zenuml", "zenuml"],
-};
-
-export function getDocs(diagramType: string | undefined, editorMode: EditorMode) {
-  if (editorMode === "config") {
-    return { url: `${DOCS_URL}/config/configuration.html`, label: "config" };
-  }
-  const entry = diagramType ? docPages[diagramType] : undefined;
-  if (!entry) return { url: `${DOCS_URL}/intro/`, label: diagramType ?? "" };
-  return { url: `${DOCS_URL}/syntax/${entry[0]}.html`, label: entry[1] };
 }

@@ -2,33 +2,71 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { DiagramExporter } from "./exporters";
 import { addHistoryEntry } from "./history-pane";
 
-const DEFAULT_NAME = "diagram.mmd";
-const pickerTypes = [{ description: "Mermaid 다이어그램", accept: { "text/plain": [".mmd", ".mermaid"] } }];
+export type FileFormat = "mmd" | "md" | "svg" | "png";
 
+export const fileFormats: Record<FileFormat, { label: string; description: string; extension: string; mime: string }> = {
+  mmd: { label: "Mermaid", description: "다시 열어 편집할 수 있는 다이어그램 코드", extension: ".mmd", mime: "text/plain" },
+  md: { label: "Markdown", description: "GitHub·Notion·Obsidian에서 그려지는 mermaid 코드 블록", extension: ".md", mime: "text/markdown" },
+  svg: { label: "SVG 이미지", description: "확대해도 깨지지 않는 벡터 이미지", extension: ".svg", mime: "image/svg+xml" },
+  png: { label: "PNG 이미지", description: "어디서나 열리는 그림 파일 (2배 해상도)", extension: ".png", mime: "image/png" },
+};
+
+/** Image formats cannot be opened again, so saving one exports a copy and keeps the current file. */
+export const isEditableFormat = (format: FileFormat) => format === "mmd" || format === "md";
+
+const DEFAULT_BASE_NAME = "diagram";
+const openTypes = [{ description: "Mermaid 다이어그램", accept: { "text/plain": [".mmd", ".mermaid", ".md", ".txt"] } }];
+
+type PickerType = { description: string; accept: Record<string, string[]> };
 // The File System Access pickers are Chromium-only and not in TypeScript's DOM lib yet.
 type PickerWindow = Window & {
-  showSaveFilePicker?: (options: { suggestedName?: string; types?: typeof pickerTypes }) => Promise<FileSystemFileHandle>;
-  showOpenFilePicker?: (options: { types?: typeof pickerTypes; multiple?: boolean }) => Promise<FileSystemFileHandle[]>;
+  showSaveFilePicker?: (options: { suggestedName?: string; types?: PickerType[] }) => Promise<FileSystemFileHandle>;
+  showOpenFilePicker?: (options: { types?: PickerType[]; multiple?: boolean }) => Promise<FileSystemFileHandle[]>;
 };
 
 export type DiagramFile = {
   /** Name of the file the diagram was last saved to or opened from. */
   name?: string;
+  /** Format of that file. */
+  format: FileFormat;
   /** True when the code changed since the last save or open. */
   dirty: boolean;
   save: () => Promise<void>;
-  saveAs: () => Promise<void>;
+  /** Opens the Save As dialog. */
+  saveAs: () => void;
+  saveAsOpen: boolean;
+  closeSaveAs: () => void;
+  /** Writes the diagram as `baseName` in `format`; called by the Save As dialog. */
+  saveWith: (baseName: string, format: FileFormat) => Promise<void>;
   open: () => Promise<void>;
 };
 
 const isAbort = (error: unknown) => error instanceof DOMException && error.name === "AbortError";
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
-const withExtension = (name: string) => (/\.(mmd|mermaid|txt)$/i.test(name) ? name : `${name}.mmd`);
 
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+export function formatFromName(name: string): FileFormat {
+  const extension = name.toLowerCase().split(".").pop();
+  if (extension === "md" || extension === "markdown") return "md";
+  if (extension === "svg") return "svg";
+  if (extension === "png") return "png";
+  return "mmd";
+}
+
+export const baseName = (name: string) => name.replace(/\.(mmd|mermaid|md|markdown|txt|svg|png)$/i, "");
+
+/** The first ```mermaid fenced block of a Markdown file, or the whole text when there is none. */
+export function codeFromMarkdown(text: string) {
+  const match = /^```mermaid[^\n]*\n([\s\S]*?)^```/m.exec(text);
+  return match ? match[1] : text;
+}
+
+export const markdownFor = (code: string) => `\`\`\`mermaid\n${code.trimEnd()}\n\`\`\`\n`;
+
+function download(name: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.download = name;
   anchor.href = url;
@@ -36,9 +74,9 @@ function download(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function writeTo(handle: FileSystemFileHandle, text: string) {
+async function writeTo(handle: FileSystemFileHandle, blob: Blob) {
   const writable = await handle.createWritable();
-  await writable.write(text);
+  await writable.write(blob);
   await writable.close();
 }
 
@@ -46,7 +84,7 @@ function pickFileWithInput() {
   return new Promise<File | undefined>((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".mmd,.mermaid,.txt,text/plain";
+    input.accept = ".mmd,.mermaid,.md,.txt,text/plain,text/markdown";
     input.addEventListener("change", () => resolve(input.files?.[0]));
     input.addEventListener("cancel", () => resolve(undefined));
     input.click();
@@ -54,19 +92,23 @@ function pickFileWithInput() {
 }
 
 /**
- * Saves the diagram code to a local .mmd file without an account. Chromium browsers keep the
- * file handle, so Save overwrites the same file; other browsers download a copy instead.
+ * Saves the diagram to local files without an account. Chromium browsers keep the file handle,
+ * so Save overwrites the same file; other browsers download a copy instead.
  */
-export function useDiagramFile(code: string, onOpen: (code: string) => void): DiagramFile {
+export function useDiagramFile(code: string, onOpen: (code: string) => void, exportDiagram: DiagramExporter): DiagramFile {
   const [name, setName] = useState<string>();
+  const [format, setFormat] = useState<FileFormat>("mmd");
   const [savedCode, setSavedCode] = useState<string>();
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
   const handleRef = useRef<FileSystemFileHandle | null>(null);
   const codeRef = useRef(code);
   const onOpenRef = useRef(onOpen);
+  const exportRef = useRef(exportDiagram);
   useEffect(() => {
     codeRef.current = code;
     onOpenRef.current = onOpen;
-  }, [code, onOpen]);
+    exportRef.current = exportDiagram;
+  }, [code, onOpen, exportDiagram]);
 
   const dirty = savedCode !== undefined && code !== savedCode;
   const dirtyRef = useRef(dirty);
@@ -74,40 +116,53 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void): Di
     dirtyRef.current = dirty;
   }, [dirty]);
 
-  const markSaved = useCallback((fileName: string, text: string) => {
+  const contentFor = useCallback(async (fileFormat: FileFormat, text: string): Promise<Blob> => {
+    if (fileFormat === "mmd") return new Blob([text], { type: "text/plain;charset=utf-8" });
+    if (fileFormat === "md") return new Blob([markdownFor(text)], { type: "text/markdown;charset=utf-8" });
+    return exportRef.current(fileFormat);
+  }, []);
+
+  const markSaved = useCallback((fileName: string, fileFormat: FileFormat, text: string) => {
     setName(fileName);
+    setFormat(fileFormat);
     setSavedCode(text);
     addHistoryEntry(text, "manual");
   }, []);
 
-  const saveAs = useCallback(async () => {
-    const text = codeRef.current;
-    const picker = (window as PickerWindow).showSaveFilePicker;
-    try {
-      if (picker) {
-        const handle = await picker({ suggestedName: name ?? DEFAULT_NAME, types: pickerTypes });
-        await writeTo(handle, text);
+  const saveWith = useCallback(
+    async (base: string, fileFormat: FileFormat) => {
+      const text = codeRef.current;
+      const { extension, mime, label } = fileFormats[fileFormat];
+      const fileName = `${baseName(base.trim()) || DEFAULT_BASE_NAME}${extension}`;
+      const picker = (window as PickerWindow).showSaveFilePicker;
+      try {
+        let handle: FileSystemFileHandle | null = null;
+        // The picker must open while the click still counts as user activation, so ask first and render after.
+        if (picker) handle = await picker({ suggestedName: fileName, types: [{ description: label, accept: { [mime]: [extension] } }] });
+        const blob = await contentFor(fileFormat, text);
+        if (handle) await writeTo(handle, blob);
+        else download(fileName, blob);
+        setSaveAsOpen(false);
+        if (!isEditableFormat(fileFormat)) return;
         handleRef.current = handle;
-        markSaved(handle.name, text);
-        return;
+        markSaved(handle?.name ?? fileName, fileFormat, text);
+      } catch (error) {
+        if (!isAbort(error)) window.alert(`저장하지 못했습니다: ${errorMessage(error)}`);
       }
-      const input = window.prompt("저장할 파일 이름", name ?? DEFAULT_NAME)?.trim();
-      if (!input) return;
-      const fileName = withExtension(input);
-      download(fileName, text);
-      markSaved(fileName, text);
-    } catch (error) {
-      if (!isAbort(error)) window.alert(`저장하지 못했습니다: ${errorMessage(error)}`);
-    }
-  }, [name, markSaved]);
+    },
+    [contentFor, markSaved],
+  );
+
+  const saveAs = useCallback(() => setSaveAsOpen(true), []);
+  const closeSaveAs = useCallback(() => setSaveAsOpen(false), []);
 
   const save = useCallback(async () => {
     const text = codeRef.current;
     const handle = handleRef.current;
     if (handle) {
       try {
-        await writeTo(handle, text);
-        markSaved(handle.name, text);
+        await writeTo(handle, await contentFor(format, text));
+        markSaved(handle.name, format, text);
       } catch (error) {
         if (!isAbort(error)) window.alert(`저장하지 못했습니다: ${errorMessage(error)}`);
       }
@@ -115,12 +170,12 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void): Di
     }
     // Without file handles a named diagram is downloaded again under the same name.
     if (name && !(window as PickerWindow).showSaveFilePicker) {
-      download(name, text);
-      markSaved(name, text);
+      download(name, await contentFor(format, text));
+      markSaved(name, format, text);
       return;
     }
-    await saveAs();
-  }, [name, saveAs, markSaved]);
+    setSaveAsOpen(true);
+  }, [name, format, contentFor, markSaved]);
 
   const open = useCallback(async () => {
     if (dirtyRef.current && !window.confirm("저장하지 않은 변경 사항이 있습니다. 다른 파일을 열까요?")) return;
@@ -129,17 +184,20 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void): Di
       let handle: FileSystemFileHandle | null = null;
       let file: File | undefined;
       if (picker) {
-        [handle] = await picker({ types: pickerTypes, multiple: false });
+        [handle] = await picker({ types: openTypes, multiple: false });
         file = await handle.getFile();
       } else {
         file = await pickFileWithInput();
       }
       if (!file) return;
+      const fileFormat = formatFromName(file.name);
       const text = await file.text();
+      const opened = fileFormat === "md" ? codeFromMarkdown(text) : text;
       handleRef.current = handle;
       setName(file.name);
-      setSavedCode(text);
-      onOpenRef.current(text);
+      setFormat(fileFormat);
+      setSavedCode(opened);
+      onOpenRef.current(opened);
     } catch (error) {
       if (!isAbort(error)) window.alert(`파일을 열지 못했습니다: ${errorMessage(error)}`);
     }
@@ -153,7 +211,8 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void): Di
       if (key === "s") {
         event.preventDefault();
         event.stopPropagation();
-        void (event.shiftKey ? saveAs() : save());
+        if (event.shiftKey) saveAs();
+        else void save();
       } else if (key === "o" && !event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
@@ -164,7 +223,7 @@ export function useDiagramFile(code: string, onOpen: (code: string) => void): Di
     return () => window.removeEventListener("keydown", onKey, true);
   }, [save, saveAs, open]);
 
-  return { name, dirty, save, saveAs, open };
+  return { name, format, dirty, save, saveAs, saveAsOpen, closeSaveAs, saveWith, open };
 }
 
 /** Shortcut prefix for menu hints: ⌘ on Apple platforms, Ctrl+ elsewhere. */

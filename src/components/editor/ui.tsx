@@ -3,12 +3,14 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 
@@ -136,11 +138,11 @@ export function Card({ title, icon, isOpen, onToggle, isStackable, header, actio
   );
 }
 
-function useDismiss(open: boolean, close: () => void, ref: React.RefObject<HTMLElement | null>) {
+function useDismiss(open: boolean, close: () => void, isInside: (target: Node) => boolean) {
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: PointerEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) close();
+      if (!isInside(event.target as Node)) close();
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
@@ -151,7 +153,7 @@ function useDismiss(open: boolean, close: () => void, ref: React.RefObject<HTMLE
       document.removeEventListener("pointerdown", onPointer);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, close, ref]);
+  }, [open, close, isInside]);
 }
 
 type PopoverProps = {
@@ -161,25 +163,80 @@ type PopoverProps = {
   className?: string;
 };
 
+type PopoverPosition = { top?: number; bottom?: number; left?: number; right?: number; maxHeight: number };
+
+const POPOVER_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+
+/**
+ * Renders the panel in a fixed layer at the editor root, so cards with overflow clipping
+ * (Sample Diagrams, Actions) cannot cut it off. It opens upward when there is no room below.
+ */
 export function Popover({ trigger, children, align = "start", className }: PopoverProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<PopoverPosition>();
+  const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
-  useDismiss(open, close, ref);
+  const isInside = useCallback(
+    (target: Node) => Boolean(anchor?.contains(target) || panelRef.current?.contains(target)),
+    [anchor],
+  );
+  useDismiss(open, close, isInside);
+  // Portal into the editor root so the panel keeps its theme variables and dark class.
+  const layer = anchor ? (anchor.closest<HTMLElement>(".mermaid-live") ?? document.body) : null;
+
+  const place = useCallback(() => {
+    const panel = panelRef.current;
+    if (!anchor || !panel) return;
+    const rect = anchor.getBoundingClientRect();
+    const height = panel.scrollHeight;
+    const below = window.innerHeight - rect.bottom - POPOVER_GAP - VIEWPORT_MARGIN;
+    const above = rect.top - POPOVER_GAP - VIEWPORT_MARGIN;
+    const openUp = height > below && above > below;
+    const horizontal =
+      align === "start" ? { left: Math.max(VIEWPORT_MARGIN, rect.left) } : { right: Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.right) };
+    setPosition(
+      openUp
+        ? { bottom: window.innerHeight - rect.top + POPOVER_GAP, maxHeight: above, ...horizontal }
+        : { top: rect.bottom + POPOVER_GAP, maxHeight: below, ...horizontal },
+    );
+  }, [align, anchor]);
+
+  const toggle = useCallback(() => {
+    setPosition(undefined);
+    setOpen((value) => !value);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, place]);
+
   return (
-    <div ref={ref} className="relative flex">
-      {trigger({ open, toggle: () => setOpen((value) => !value) })}
-      {open && (
-        <div
-          className={cn(
-            "absolute top-full z-50 mt-1 rounded-md border border-(--ml-border) bg-(--ml-background) text-(--ml-foreground) shadow-md",
-            align === "start" ? "left-0" : "right-0",
-            className,
-          )}
-        >
-          {children(close)}
-        </div>
-      )}
+    <div ref={setAnchor} className="relative flex">
+      {trigger({ open, toggle })}
+      {open &&
+        layer &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{ ...position, visibility: position ? "visible" : "hidden" }}
+            className={cn(
+              "fixed z-50 overflow-y-auto rounded-md border border-(--ml-border) bg-(--ml-background) text-(--ml-foreground) shadow-md",
+              className,
+            )}
+          >
+            {children(close)}
+          </div>,
+          layer,
+        )}
     </div>
   );
 }
@@ -226,16 +283,26 @@ export function Dialog({ open, onClose, className, children }: DialogProps) {
   );
 }
 
-export function CopyInput({ value, label = "복사" }: { value: string; label?: string }) {
+export function CopyInput({ value, label = "복사", multiline = false }: { value: string; label?: string; multiline?: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex w-full items-center gap-2">
-      <input
-        readOnly
-        value={value}
-        onFocus={(event) => event.currentTarget.select()}
-        className="h-9 w-full min-w-0 rounded-md border border-(--ml-input) bg-transparent px-3 py-1 text-sm shadow-sm"
-      />
+    <div className={cn("flex w-full gap-2", multiline ? "items-start" : "items-center")}>
+      {multiline ? (
+        <textarea
+          readOnly
+          value={value}
+          rows={Math.min(6, value.split("\n").length)}
+          onFocus={(event) => event.currentTarget.select()}
+          className="w-full min-w-0 resize-none rounded-md border border-(--ml-input) bg-transparent px-3 py-2 font-mono text-xs shadow-sm"
+        />
+      ) : (
+        <input
+          readOnly
+          value={value}
+          onFocus={(event) => event.currentTarget.select()}
+          className="h-9 w-full min-w-0 rounded-md border border-(--ml-input) bg-transparent px-3 py-1 text-sm shadow-sm"
+        />
+      )}
       <Button
         onClick={() => {
           void navigator.clipboard.writeText(value).then(() => {

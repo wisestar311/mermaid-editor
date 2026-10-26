@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Contrast, Copy, FolderOpen, Plus, Save, SaveAll, Share2, ShieldCheck, Users } from "lucide-react";
+import { Contrast, Copy, FolderOpen, Plus, Save, SaveAll, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 import { modKey, type DiagramFile } from "./diagram-file";
 import { ChevronDownIcon, GithubIcon, HistoryIcon, MenuIcon, MermaidIcon } from "./icons";
-import { Button, CopyInput, Dialog, Popover, Separator, Toggle, buttonClasses } from "./ui";
+import { Button, Dialog, Popover, Separator, Toggle, buttonClasses } from "./ui";
 
 type MenuEntry = {
   label: string;
@@ -34,9 +34,8 @@ function MainMenu({ newHref, dark, onToggleDark, file }: MainMenuProps) {
     { label: "복제", icon: <Copy />, href: typeof window === "undefined" ? "#" : window.location.href, newTab: true },
     { label: "열기", icon: <FolderOpen />, onClick: () => void file.open() },
     { label: "저장", icon: <Save />, onClick: () => void file.save() },
-    { label: "다른 이름으로 저장", icon: <SaveAll />, onClick: () => void file.saveAs(), sectionEnd: true },
+    { label: "다른 이름으로 저장", icon: <SaveAll />, onClick: file.saveAs, sectionEnd: true },
     { label: "Mermaid.js", icon: <MermaidIcon />, href: "https://mermaid.js.org", newTab: true },
-    { label: "문서", icon: <BookOpen />, href: "https://mermaid.js.org/intro/", newTab: true },
     { label: "커뮤니티", icon: <Users />, href: "https://discord.gg/sKeNQX4Wtj", newTab: true },
     { label: "다크 모드", icon: <Contrast />, onClick: onToggleDark, isDarkToggle: true },
   ];
@@ -48,7 +47,7 @@ function MainMenu({ newHref, dark, onToggleDark, file }: MainMenuProps) {
           <span className="sr-only">메인 메뉴</span>
         </button>
       )}
-      className="mt-3 w-60 p-0"
+      className="mt-2 w-60 p-0"
     >
       {(close) => (
         <ul className="flex flex-col">
@@ -246,28 +245,6 @@ function SaveMenu({ file }: { file: DiagramFile }) {
         }
       </Popover>
     </div>
-  );
-}
-
-export function ShareDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Dialog open={open} onClose={onClose} className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-      <div className="flex flex-col space-y-1.5 text-center sm:text-left">
-        <h2 className="flex items-center gap-2 text-xl font-semibold">
-          <Share2 className="size-5" /> 공유 링크
-        </h2>
-        <p className="text-sm text-(--ml-muted-foreground)">다이어그램을 다른 사람과 공유하세요.</p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <h3 className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element -- static favicon */}
-          <img className="size-5" src="/icons/favicon.svg" alt="" />
-          Mermaid 에디터
-        </h3>
-        {open && <CopyInput value={window.location.href} />}
-        <p className="text-sm text-(--ml-muted-foreground)">만든 다이어그램의 내용은 브라우저 밖으로 전송되지 않습니다.</p>
-      </div>
-    </Dialog>
   );
 }
 
