@@ -1,0 +1,73 @@
+/* mermaid.live design tokens and fonts, scoped to the clone's root element. */
+@font-face {
+  font-family: "Recursive Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 1000;
+  src: url("/fonts/recursive-latin-ext-crsv-normal.woff2") format("woff2-variations");
+  unicode-range:
+    U+100-2BA, U+2BD-2C5, U+2C7-2CC, U+2CE-2D7, U+2DD-2FF, U+304, U+308, U+329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: "Recursive Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 1000;
+  src: url("/fonts/recursive-latin-crsv-normal.woff2") format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308, U+329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+.mermaid-live {
+  --ml-background: #fff;
+  --ml-foreground: #020817;
+  --ml-primary: #e6e6ea;
+  --ml-primary-foreground: #221f2e;
+  --ml-secondary: #f1f5f9;
+  --ml-secondary-foreground: #0f172a;
+  --ml-muted: #f2f3f7;
+  --ml-muted-foreground: #64748b;
+  --ml-accent: #e0004b;
+  --ml-accent-foreground: #f8fafc;
+  --ml-border: #e2e8f0;
+  --ml-input: #e2e8f0;
+  --ml-ring: #020817;
+  --ml-grid-dot: #e4e4e48c;
+
+  /* Recursive has no Hangul, so Korean text falls through to Pretendard. */
+  font-family: "Recursive Variable", "Pretendard Variable", sans-serif;
+  color: var(--ml-foreground);
+  background: var(--ml-background);
+  color-scheme: light;
+}
+
+.mermaid-live.dark {
+  --ml-background: #020817;
+  --ml-foreground: #f8fafc;
+  --ml-primary: #2e4d6b;
+  --ml-primary-foreground: #d9e1f2;
+  --ml-secondary: #1e293b;
+  --ml-secondary-foreground: #f8fafc;
+  --ml-muted: #1e293b;
+  --ml-muted-foreground: #94a3b8;
+  --ml-border: #1e293b;
+  --ml-input: #1e293b;
+  --ml-ring: #cbd5e1;
+  --ml-grid-dot: #46464646;
+
+  color-scheme: dark;
+}
+
+.mermaid-live .ml-grid {
+  background-size: 30px 30px;
+  background-image: radial-gradient(circle, var(--ml-grid-dot) 2px, #0000 2px);
+}
+
+.mermaid-live #ml-container svg {
+  height: 100%;
+  max-width: 100%;
+}
+
