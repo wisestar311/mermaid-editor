@@ -19,10 +19,11 @@ type MenuEntry = {
   className?: string;
   newTab?: boolean;
   isDarkToggle?: boolean;
+  shortcut?: string;
 };
 
 type MainMenuProps = {
-  newHref: string;
+  onNew: () => void;
   dark: boolean;
   onToggleDark: () => void;
   file: DiagramFile;
@@ -31,19 +32,21 @@ type MainMenuProps = {
   onOffline: () => void;
 };
 
-function MainMenu({ newHref, dark, onToggleDark, file, onShare, onLibrary, onOffline }: MainMenuProps) {
+function MainMenu({ onNew, dark, onToggleDark, file, onShare, onLibrary, onOffline }: MainMenuProps) {
+  const mod = typeof navigator === "undefined" ? "Ctrl+" : modKey();
+  // Grouped as file, diagram, app and links.
   const entries: MenuEntry[] = [
+    { label: "새로 만들기", icon: <Plus />, onClick: onNew },
+    { label: "파일 열기", icon: <FolderOpen />, onClick: () => void file.open(), shortcut: `${mod}O` },
+    { label: "저장", icon: <Save />, onClick: () => void file.save(), shortcut: `${mod}S` },
+    { label: "다른 이름으로 저장", icon: <SaveAll />, onClick: file.saveAs, shortcut: `⇧${mod}S`, sectionEnd: true },
     { label: "보관함", icon: <Library />, onClick: onLibrary },
-    { label: "새로 만들기", icon: <Plus />, href: newHref, newTab: true },
-    { label: "복제", icon: <Copy />, href: typeof window === "undefined" ? "#" : window.location.href, newTab: true },
-    { label: "열기", icon: <FolderOpen />, onClick: () => void file.open() },
-    { label: "저장", icon: <Save />, onClick: () => void file.save() },
-    { label: "다른 이름으로 저장", icon: <SaveAll />, onClick: file.saveAs, sectionEnd: true },
     { label: "공유", icon: <Share2 />, onClick: onShare },
-    { label: "오프라인·앱 설치", icon: <CloudDownload />, onClick: onOffline, sectionEnd: true },
-    { label: "Mermaid.js", icon: <MermaidIcon />, href: "https://mermaid.js.org", newTab: true },
+    { label: "새 탭에 복제", icon: <Copy />, href: typeof window === "undefined" ? "#" : window.location.href, newTab: true, sectionEnd: true },
+    { label: "오프라인·앱 설치", icon: <CloudDownload />, onClick: onOffline },
+    { label: "다크 모드", icon: <Contrast />, onClick: onToggleDark, isDarkToggle: true, sectionEnd: true },
+    { label: "Mermaid.js 문서", icon: <MermaidIcon />, href: "https://mermaid.js.org", newTab: true },
     { label: "커뮤니티", icon: <Users />, href: "https://discord.gg/sKeNQX4Wtj", newTab: true },
-    { label: "다크 모드", icon: <Contrast />, onClick: onToggleDark, isDarkToggle: true },
   ];
   return (
     <Popover
@@ -61,7 +64,8 @@ function MainMenu({ newHref, dark, onToggleDark, file, onShare, onLibrary, onOff
             const content = (
               <>
                 <span className="[&_svg]:size-5">{entry.icon}</span>
-                <span className="grow">{entry.label}</span>
+                <span className="grow text-left">{entry.label}</span>
+                {entry.shortcut && <kbd className="font-sans text-xs opacity-60">{entry.shortcut}</kbd>}
                 {entry.isDarkToggle && (
                   <span
                     className={cn(
@@ -210,7 +214,6 @@ function SaveMenu({ file }: { file: DiagramFile }) {
   const items = [
     { label: "저장", shortcut: `${mod}S`, icon: <Save />, run: file.save },
     { label: "다른 이름으로 저장", shortcut: `⇧${mod}S`, icon: <SaveAll />, run: file.saveAs },
-    { label: "열기", shortcut: `${mod}O`, icon: <FolderOpen />, run: file.open },
   ];
   return (
     <div className="flex">

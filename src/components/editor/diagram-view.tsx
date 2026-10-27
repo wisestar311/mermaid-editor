@@ -88,7 +88,15 @@ export function DiagramView({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || hasError || code === undefined) return;
+    if (!container) return;
+    if (code === undefined) {
+      // Nothing to draw, e.g. a new empty diagram: clear the previous one.
+      panZoomRef.current?.destroy();
+      panZoomRef.current = null;
+      container.innerHTML = "";
+      return;
+    }
+    if (hasError) return;
     let cancelled = false;
 
     const run = async () => {

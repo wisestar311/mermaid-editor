@@ -124,6 +124,8 @@ export function LiveEditor() {
   // Parse on every code or site-mode change; a valid diagram also syncs the managed theme.
   useEffect(() => {
     let cancelled = false;
+    // An empty editor is a fresh start, not an error, so it is not parsed.
+    if (!state.code.trim()) return;
     void parseDiagram(state.code).then((result) => {
       if (cancelled) return;
       setParse(result);
@@ -157,10 +159,11 @@ export function LiveEditor() {
       return error instanceof Error ? error.message : "설정 JSON이 올바르지 않습니다";
     }
   }, [state.mermaid]);
-  const hasError = (parse !== null && "error" in parse) || configError !== undefined;
+  const empty = !state.code.trim();
+  const hasError = (!empty && parse !== null && "error" in parse) || configError !== undefined;
   const editorError = useMemo(
-    () => (parse && "error" in parse ? { message: parse.error, line: parse.line } : undefined),
-    [parse],
+    () => (!empty && parse && "error" in parse ? { message: parse.error, line: parse.line } : undefined),
+    [parse, empty],
   );
 
   const update = (patch: Partial<LiveState>) => setState((current) => ({ ...current, ...patch }));
@@ -219,6 +222,7 @@ export function LiveEditor() {
   };
 
   const withCleanSvg: WithCleanSvg = async (run) => {
+    if (empty) throw new Error("그릴 다이어그램이 없습니다. 코드를 입력하세요.");
     if (hasError || validCode !== state.code) throw new Error("코드와 설정의 오류를 수정한 뒤 이미지를 내보내세요.");
     setExporting(true);
     try {
@@ -237,6 +241,20 @@ export function LiveEditor() {
   };
   const exportDiagram = createExporter(withCleanSvg);
   const file = useDiagramFile(state.code, loadCode, exportDiagram);
+
+  // Starts an empty diagram in this tab; the current code stays in the history timeline.
+  const newDiagram = () => {
+    if (file.dirty) {
+      if (!window.confirm("저장하지 않은 파일 변경 사항이 있습니다. 새로 만들까요?")) return;
+    } else if (state.code.trim() && !window.confirm("현재 다이어그램을 비우고 새로 만들까요? 지금 코드는 기록의 타임라인에 남습니다.")) {
+      return;
+    }
+    if (state.code.trim()) addHistoryEntry(state.code, "auto");
+    file.detach();
+    setDocumentRevision((value) => value + 1);
+    update({ code: "", mermaid: "{}", editorMode: "code", pan: undefined, zoom: undefined });
+    if (isMobile) setIsViewMode(false);
+  };
 
   // Library previews are small rasters so dozens of them fit in local storage.
   const libraryThumbnail = async () => {
@@ -268,7 +286,7 @@ export function LiveEditor() {
         onShare={() => setShareOpen(true)}
         onLibrary={() => setLibraryOpen(true)}
         onOffline={() => setOfflineOpen(true)}
-        newHref={urls.newDiagram}
+        onNew={newDiagram}
         dark={dark}
         onToggleDark={toggleDark}
         file={file}
@@ -368,7 +386,7 @@ export function LiveEditor() {
             />
             <div ref={viewPaneRef} className="relative flex h-full flex-col overflow-hidden bg-(--ml-background)" style={{ flex: `${isMobile ? 50 : middleSize} 1 0px` }}>
               <DiagramView
-                code={validCode}
+                code={empty ? undefined : validCode}
                 config={state.mermaid}
                 rough={state.rough}
                 grid={state.grid}
@@ -380,6 +398,11 @@ export function LiveEditor() {
                 hasError={hasError}
                 controllerRef={controllerRef}
               />
+              {empty && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-(--ml-muted-foreground)">
+                  <p>왼쪽에 코드를 입력하면 여기에 다이어그램이 그려집니다.<br />샘플을 고르거나 간편 삽입으로 시작할 수 있습니다.</p>
+                </div>
+              )}
               {configError && (
                 <p role="alert" className="absolute top-16 right-2 left-2 rounded-lg bg-(--ml-background) p-3 text-sm text-red-600">
                   설정 오류: {configError}

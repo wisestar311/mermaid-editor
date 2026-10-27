@@ -38,7 +38,14 @@ export function QuickInsert({ code, onChange }: { code: string; onChange: (code:
           <Button size="sm" onClick={() => insert("message")}>메시지 추가</Button>
         </div>
       </>}
-      {!diagram && <p className="text-xs">간편 삽입은 플로차트와 시퀀스 다이어그램에서 사용할 수 있습니다. 샘플에서 선택하세요.</p>}
+      {!diagram && !code.trim() && <>
+        <p className="text-xs">빈 다이어그램입니다. 시작할 종류를 고르세요.</p>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => onChange("flowchart TD\n")}>플로차트로 시작</Button>
+          <Button size="sm" onClick={() => onChange("sequenceDiagram\n")}>시퀀스로 시작</Button>
+        </div>
+      </>}
+      {!diagram && code.trim() && <p className="text-xs">간편 삽입은 플로차트와 시퀀스 다이어그램에서 사용할 수 있습니다. 샘플에서 선택하세요.</p>}
       {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
     </div>}
   </div>;

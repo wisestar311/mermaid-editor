@@ -138,6 +138,5 @@ export function buildUrls(state: LiveState, serialized: string) {
     svg: `${RENDERER_URL}/svg/${serialized}`,
     kroki: `${KROKI_URL}/mermaid/svg/${pakoSerialize(state.code)}`,
     mdCode: `[![](${png})](${window.location.href})`,
-    newDiagram: `${window.location.pathname}#${serializeState(defaultState)}`,
   };
 }
