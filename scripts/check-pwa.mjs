@@ -37,6 +37,9 @@ function storeFor(name) {
 const context = vm.createContext({
   URL,
   Set,
+  AbortController,
+  setTimeout,
+  clearTimeout,
   self: {
     location: { origin },
     addEventListener(name, handler) { handlers[name] = handler; },
@@ -84,6 +87,15 @@ handlers.message({ data: { type: 'CACHE_ALL' }, source: { postMessage(message) {
 await pending;
 assert.equal(stores.get(cacheName).size, urls.length);
 assert.deepEqual({ ...messages.at(-1) }, { type: 'OFFLINE_STATUS', cached: urls.length, total: urls.length });
+
+// Online navigation goes to the network so the page matches the deployed build files.
+let networkPages = 0;
+const fetchOnline = context.fetch;
+context.fetch = async () => { networkPages++; return { ok: true, url: 'network' }; };
+handlers.fetch({ request: { url: `${origin}${base}/`, method: 'GET', mode: 'navigate' }, respondWith(value) { response = value; } });
+assert.equal((await response).url, 'network');
+assert.equal(networkPages, 1);
+context.fetch = fetchOnline;
 
 online = false;
 handlers.fetch({ request: { url: `${origin}${base}/?offline=1`, method: 'GET', mode: 'navigate' }, respondWith(value) { response = value; } });

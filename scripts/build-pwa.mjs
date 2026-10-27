@@ -140,10 +140,24 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || url.origin !== self.location.origin || !url.pathname.startsWith(ROOT)) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    // Serve a consistent application version, including while a newer worker is waiting.
-    const cached = await cache.match(request, { ignoreSearch: request.mode === 'navigate' });
+    if (request.mode === 'navigate') {
+      // The page comes from the network while online, so it never names build files a newer deploy removed.
+      // The cached page, whose files are cached with it, is the offline fallback.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(request, { signal: controller.signal });
+        if (response.ok) return response;
+      } catch {
+        // Offline or too slow: use the cached page below.
+      } finally {
+        clearTimeout(timer);
+      }
+      return (await cache.match(request, { ignoreSearch: true })) || (await cache.match(ROOT)) || fetch(request);
+    }
+    // Build files have content-hashed names, so a cached copy is always the right one.
+    const cached = await cache.match(request);
     if (cached) return cached;
-    if (request.mode === 'navigate') return (await cache.match(ROOT)) || fetch(request);
     const response = await fetch(request);
     if (response.ok && KNOWN.has(url.pathname) && !url.search) {
       const copy = response.clone();

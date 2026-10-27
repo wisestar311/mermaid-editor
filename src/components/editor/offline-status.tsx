@@ -20,6 +20,7 @@ export type Offline = {
   downloadAll: () => void;
   applyUpdate: () => void;
   install: () => void;
+  reset: () => Promise<void>;
 };
 
 /** Service worker registration, offline readiness and the install prompt. */
@@ -71,7 +72,9 @@ export function useOffline(): Offline {
               active.postMessage({ type: "CACHE_URLS", urls });
             }
           }
-          if (registration.waiting) setUpdate(registration.waiting);
+          // A waiting worker is only an update when another version already controls this page;
+          // on the first visit the new worker passes through "waiting" on its way to activation.
+          setUpdate(registration.waiting && navigator.serviceWorker.controller ? registration.waiting : null);
         };
         const watch = () => {
           const worker = registration.installing;
@@ -82,6 +85,7 @@ export function useOffline(): Offline {
         };
         refresh(); watch();
         registration.addEventListener("updatefound", watch);
+        navigator.serviceWorker.addEventListener("controllerchange", refresh);
       }).catch(() => { if (!disposed) setPhase("failed"); });
     }
     return () => {
@@ -102,15 +106,25 @@ export function useOffline(): Offline {
     });
   }, []);
   const applyUpdate = useCallback(() => {
-    if (!update) return;
+    // The update may already be active (another tab applied it); then a reload is all that is left.
+    if (!update || update.state !== "installed") {
+      location.reload();
+      return;
+    }
     navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
     update.postMessage("ACTIVATE_UPDATE");
   }, [update]);
+  /** Last resort when a stored version misbehaves: drop the worker and its files, then load from the network. */
+  const reset = useCallback(async () => {
+    for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
+    for (const key of await caches.keys()) if (key.startsWith("mermaid-editor:")) await caches.delete(key);
+    location.reload();
+  }, []);
   const install = useCallback(() => {
     void installEvent?.prompt().then(() => installEvent.userChoice).then(() => setInstallEvent(null));
   }, [installEvent]);
 
-  return { online, phase, progress, downloading, downloadError, update, canInstall: installEvent !== null, downloadAll, applyUpdate, install };
+  return { online, phase, progress, downloading, downloadError, update, canInstall: installEvent !== null, downloadAll, applyUpdate, install, reset };
 }
 
 const percent = (progress: Progress) => Math.floor((progress.cached / Math.max(progress.total, 1)) * 100);
@@ -163,6 +177,11 @@ export function OfflineDialog({ offline, open, onClose }: { offline: Offline; op
       {canInstall
         ? <Button variant="outline" onClick={offline.install}>앱 설치</Button>
         : <p className="text-sm">iPhone·iPad에서는 Safari의 공유 메뉴 → 홈 화면에 추가를 선택하세요.</p>}
+      {phase !== "unsupported" && (
+        <Button variant="ghost" onClick={() => {
+          if (window.confirm("오프라인용으로 저장한 파일을 지우고 최신 버전을 다시 불러올까요? 다이어그램과 보관함은 지워지지 않습니다.")) void offline.reset();
+        }}>오프라인 저장 초기화</Button>
+      )}
       <p className="text-xs text-(--ml-muted-foreground)">외부 아이콘, Gist, 외부 렌더러(mermaid.ink·Kroki)는 인터넷이 필요합니다.</p>
     </Dialog>
   );
