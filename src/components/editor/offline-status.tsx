@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { resetAppFiles } from "../recovery/app-reset";
 import { Button, Dialog } from "./ui";
 
 type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
@@ -52,8 +53,14 @@ export function useOffline(): Offline {
     window.addEventListener("offline", network);
     window.addEventListener("beforeinstallprompt", installer);
     window.addEventListener("appinstalled", installed);
+    const hadController = enabled() && navigator.serviceWorker.controller !== null;
+    const takenOver = () => {
+      // The new version's worker took over; its page loads on the next reload.
+      if (!disposed && hadController) setUpdate(navigator.serviceWorker.controller);
+    };
     if (enabled()) {
       navigator.serviceWorker.addEventListener("message", onMessage);
+      navigator.serviceWorker.addEventListener("controllerchange", takenOver);
       void navigator.serviceWorker.register(`${BASE}/sw.js`).then((registration) => {
         if (disposed) return;
         let reported = false;
@@ -74,7 +81,7 @@ export function useOffline(): Offline {
           }
           // A waiting worker is only an update when another version already controls this page;
           // on the first visit the new worker passes through "waiting" on its way to activation.
-          setUpdate(registration.waiting && navigator.serviceWorker.controller ? registration.waiting : null);
+          if (registration.waiting && navigator.serviceWorker.controller) setUpdate(registration.waiting);
         };
         const watch = () => {
           const worker = registration.installing;
@@ -85,7 +92,6 @@ export function useOffline(): Offline {
         };
         refresh(); watch();
         registration.addEventListener("updatefound", watch);
-        navigator.serviceWorker.addEventListener("controllerchange", refresh);
       }).catch(() => { if (!disposed) setPhase("failed"); });
     }
     return () => {
@@ -94,7 +100,10 @@ export function useOffline(): Offline {
       window.removeEventListener("offline", network);
       window.removeEventListener("beforeinstallprompt", installer);
       window.removeEventListener("appinstalled", installed);
-      if (enabled()) navigator.serviceWorker.removeEventListener("message", onMessage);
+      if (enabled()) {
+        navigator.serviceWorker.removeEventListener("message", onMessage);
+        navigator.serviceWorker.removeEventListener("controllerchange", takenOver);
+      }
     };
   }, []);
 
@@ -114,17 +123,11 @@ export function useOffline(): Offline {
     navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
     update.postMessage("ACTIVATE_UPDATE");
   }, [update]);
-  /** Last resort when a stored version misbehaves: drop the worker and its files, then load from the network. */
-  const reset = useCallback(async () => {
-    for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister();
-    for (const key of await caches.keys()) if (key.startsWith("mermaid-editor:")) await caches.delete(key);
-    location.reload();
-  }, []);
   const install = useCallback(() => {
     void installEvent?.prompt().then(() => installEvent.userChoice).then(() => setInstallEvent(null));
   }, [installEvent]);
 
-  return { online, phase, progress, downloading, downloadError, update, canInstall: installEvent !== null, downloadAll, applyUpdate, install, reset };
+  return { online, phase, progress, downloading, downloadError, update, canInstall: installEvent !== null, downloadAll, applyUpdate, install, reset: resetAppFiles };
 }
 
 const percent = (progress: Progress) => Math.floor((progress.cached / Math.max(progress.total, 1)) * 100);

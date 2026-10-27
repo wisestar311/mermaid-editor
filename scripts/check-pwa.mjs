@@ -10,6 +10,7 @@ assert.equal(manifest.start_url, `${base}/`);
 const handlers = {};
 const stores = new Map();
 let claimed = false;
+let skipped = false;
 let online = true;
 const pathOf = (request) => new URL(typeof request === 'string' ? request : request.url, origin);
 async function fetchFile(request) {
@@ -44,7 +45,7 @@ const context = vm.createContext({
     location: { origin },
     addEventListener(name, handler) { handlers[name] = handler; },
     clients: { async claim() { claimed = true; } },
-    skipWaiting() {},
+    async skipWaiting() { skipped = true; },
   },
   caches: {
     async open(name) { return storeFor(name); },
@@ -68,6 +69,7 @@ handlers.install({ waitUntil(value) { pending = value; } });
 await pending;
 assert.equal(stores.get(cacheName).size, core.length + 1);
 assert.equal(stores.get(cacheName).get(immutable).carried, true);
+assert.equal(skipped, true, '새 워커는 기다리지 않고 바로 교체돼야 합니다');
 handlers.activate({ waitUntil(value) { pending = value; } });
 await pending;
 assert.equal(claimed, true);

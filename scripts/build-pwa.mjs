@@ -99,6 +99,9 @@ self.addEventListener('install', (event) => {
       // Bound concurrent downloads on mobile networks. Activation only follows a complete core.
       await addInBatches(cache, (await missing(cache)).filter((url) => CORE.includes(url)));
     } catch (error) { await caches.delete(CACHE); throw error; }
+    // Pages always come from the network while online, so an open page never needs the old worker:
+    // take over at once instead of waiting until every tab of the old version is closed.
+    await self.skipWaiting();
   })());
 });
 self.addEventListener('activate', (event) => {
