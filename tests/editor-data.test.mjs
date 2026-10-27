@@ -62,3 +62,27 @@ test('여러 Markdown 블록을 번갈아 편집해도 각 변경과 본문을 �
   assert.ok(second.endsWith('~~~\n끝'));
   assert.equal(replaceMermaidBlock(source, 'A-->B\n'), source);
 });
+
+test('블록을 닫는 줄이 든 코드는 Markdown에 넣지 않는다', async () => {
+  const { markdownFor } = await import('../src/components/editor/markdown.ts');
+  const source = '# 문서\n```mermaid\nA-->B\n```\n';
+  assert.throws(() => replaceMermaidBlock(source, 'A-->B\n```\nC-->D'), /코드 블록을 닫는 줄/);
+  assert.throws(() => replaceMermaidBlock(source.replaceAll('\n', '\r\n'), 'A-->B\r\n```\r\nC'), /코드 블록을 닫는 줄/);
+  // A shorter or different marker does not close a longer tilde fence.
+  assert.ok(replaceMermaidBlock('~~~~mermaid\nA\n~~~~\n', 'A\n```\n~~~\nB').includes('```\n~~~\nB'));
+  const fenced = markdownFor('A-->B\n````\nC');
+  assert.ok(fenced.startsWith('`````mermaid\n'));
+  assert.equal(codeFromMarkdown(fenced), 'A-->B\n````\nC\n');
+});
+
+test('문서를 본문과 다이어그램 순서대로 나눈다', async () => {
+  const { markdownParts } = await import('../src/components/editor/markdown.ts');
+  const parts = markdownParts('# 제목\n\n```mermaid\nA-->B\n```\n중간\n~~~mermaid\nC-->D\n~~~');
+  assert.deepEqual(parts, [
+    { kind: 'text', text: '# 제목' },
+    { kind: 'diagram', code: 'A-->B\n', index: 0 },
+    { kind: 'text', text: '중간' },
+    { kind: 'diagram', code: 'C-->D\n', index: 1 },
+  ]);
+  assert.deepEqual(markdownParts('```mermaid\n```'), [{ kind: 'diagram', code: '', index: 0 }]);
+});

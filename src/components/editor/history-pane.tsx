@@ -1,12 +1,13 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { GitCompare, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
 import { HistoryIcon } from "./icons";
-import { Button } from "./ui";
+import { MonacoDiff } from "./monaco-editor";
+import { Button, Dialog } from "./ui";
 
 export type HistoryEntry = { id: string; time: number; code: string; type: "auto" | "manual" };
 
@@ -55,8 +56,9 @@ export function useAutoSave(code: string) {
   }, [code]);
 }
 
-export function HistoryPane({ code, onRestore }: { code: string; onRestore: (code: string) => void }) {
+export function HistoryPane({ code, dark, onRestore }: { code: string; dark: boolean; onRestore: (code: string) => void }) {
   const [tab, setTab] = useState<HistoryEntry["type"]>("manual");
+  const [comparing, setComparing] = useState<HistoryEntry | null>(null);
   const [entries, setEntries] = useState(readHistory);
 
   useEffect(() => {
@@ -105,6 +107,9 @@ export function HistoryPane({ code, onRestore }: { code: string; onRestore: (cod
               <span className="block text-xs text-(--ml-muted-foreground)">{new Date(entry.time).toLocaleString("ko-KR")}</span>
               <span className="block truncate font-mono text-xs">{entry.code.split("\n")[0]}</span>
             </button>
+            <Button size="icon" variant="ghost" title="현재 코드와 비교" aria-label="현재 코드와 비교" onClick={() => setComparing(entry)}>
+              <GitCompare className="size-4!" />
+            </Button>
             <Button
               size="icon"
               variant="ghost"
@@ -120,6 +125,24 @@ export function HistoryPane({ code, onRestore }: { code: string; onRestore: (cod
           </div>
         ))}
       </div>
+      <Dialog open={comparing !== null} onClose={() => setComparing(null)} className="w-[min(72rem,95vw)] max-w-none grid-cols-[minmax(0,1fr)]">
+        {comparing && (
+          <>
+            <h2 className="pr-6 text-xl font-semibold">기록 비교</h2>
+            <div className="grid grid-cols-2 text-sm text-(--ml-muted-foreground)">
+              <span>기록: {new Date(comparing.time).toLocaleString("ko-KR")}</span>
+              <span>현재 코드</span>
+            </div>
+            {comparing.code === code
+              ? <p className="py-8 text-center text-sm">현재 코드와 같습니다.</p>
+              : <div className="h-[65dvh] overflow-hidden rounded border border-(--ml-border)"><MonacoDiff original={comparing.code} modified={code} dark={dark} /></div>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setComparing(null)}>닫기</Button>
+              <Button onClick={() => { onRestore(comparing.code); setComparing(null); }}>이 기록으로 복원</Button>
+            </div>
+          </>
+        )}
+      </Dialog>
     </div>
   );
 }

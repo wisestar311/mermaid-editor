@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 import { LibraryDialog } from "./library-dialog";
 import { QuickInsert } from "./quick-insert-panel";
-import { OfflineStatus } from "./offline-status";
+import { MarkdownPreview } from "./markdown-preview";
+import { OfflineBar, OfflineDialog, useOffline } from "./offline-status";
 
 import { DiagramView, type DiagramController } from "./diagram-view";
 import { useDiagramFile } from "./diagram-file";
@@ -26,7 +27,7 @@ import {
 } from "./icons";
 import { parseDiagram, syncManagedTheme, type ParseResult } from "./mermaid-runtime";
 import { MonacoEditor } from "./monaco-editor";
-import { createExporter, type WithCleanSvg } from "./exporters";
+import { createExporter, rasterize, type WithCleanSvg } from "./exporters";
 import { Navbar, PrivacyDialog } from "./navbar";
 import { ActionsCard, SamplesCard } from "./panels";
 import { SaveAsDialog } from "./save-as-dialog";
@@ -102,6 +103,9 @@ export function LiveEditor() {
   const [leftSize, setLeftSize] = useState(() => Number(readStorage(PANES_KEY)) || 30);
   const [historySize, setHistorySize] = useState(30);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [offlineOpen, setOfflineOpen] = useState(false);
+  const [previewDocument, setPreviewDocument] = useState<string | null>(null);
+  const offline = useOffline();
   const [shareOpen, setShareOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -234,6 +238,20 @@ export function LiveEditor() {
   const exportDiagram = createExporter(withCleanSvg);
   const file = useDiagramFile(state.code, loadCode, exportDiagram);
 
+  // Library previews are small rasters so dozens of them fit in local storage.
+  const libraryThumbnail = async () => {
+    try {
+      return await withCleanSvg(async (svg, background) => {
+        let canvas = await rasterize(svg, background, { mode: "width", value: 240 });
+        if (canvas.height > 180) canvas = await rasterize(svg, background, { mode: "height", value: 180 });
+        const webp = canvas.toDataURL("image/webp", 0.8);
+        return webp.startsWith("data:image/webp") ? webp : canvas.toDataURL("image/png");
+      });
+    } catch {
+      return undefined;
+    }
+  };
+
   return (
     <div
       ref={rootRef}
@@ -249,12 +267,13 @@ export function LiveEditor() {
         onHistoryChange={setHistoryOpen}
         onShare={() => setShareOpen(true)}
         onLibrary={() => setLibraryOpen(true)}
+        onOffline={() => setOfflineOpen(true)}
         newHref={urls.newDiagram}
         dark={dark}
         onToggleDark={toggleDark}
         file={file}
       />
-      <OfflineStatus />
+      <OfflineBar offline={offline} onDetails={() => setOfflineOpen(true)} />
       <div ref={layoutRef} className="flex flex-1 flex-col overflow-hidden">
         <div
           className={cn(
@@ -308,6 +327,7 @@ export function LiveEditor() {
                         <select aria-label="Markdown 다이어그램 선택" className="min-w-0 grow rounded border bg-(--ml-background) p-2" value={file.selectedBlock} onChange={(event) => file.selectBlock(Number(event.target.value))}>
                           {file.markdownBlocks.map((code, index) => <option key={index} value={index}>{index + 1}. {code.trim().split("\n")[0].slice(0, 60)}</option>)}
                         </select>
+                        <Button size="sm" variant="outline" onClick={() => setPreviewDocument(file.currentDocument())}>전체 미리보기</Button>
                       </label>
                     )}
                     <div className="min-h-20 flex-1 overflow-hidden">
@@ -421,14 +441,14 @@ export function LiveEditor() {
                   className="ml-1 hidden w-px shrink-0 cursor-ew-resize touch-none opacity-0 select-none sm:block"
                 />
                 <div className="hidden h-full grow flex-col sm:flex" style={{ flex: `${historySize} 1 0px` }}>
-                  <HistoryPane code={state.code} onRestore={loadCode} />
+                  <HistoryPane code={state.code} dark={dark} onRestore={loadCode} />
                 </div>
               </>
             )}
           </div>
         </div>
       </div>
-      {libraryOpen && <LibraryDialog state={state} onClose={() => setLibraryOpen(false)} onLoad={(saved) => {
+      {libraryOpen && <LibraryDialog state={state} thumbnail={libraryThumbnail} onClose={() => setLibraryOpen(false)} onLoad={(saved) => {
         if (file.dirty && !window.confirm("저장하지 않은 파일 변경 사항이 있습니다. 보관함의 다이어그램을 열까요?")) return;
         addHistoryEntry(state.code, "auto");
         file.detach();
@@ -438,6 +458,16 @@ export function LiveEditor() {
       <ShareDialog open={shareOpen} onClose={() => setShareOpen(false)} code={state.code} exportDiagram={exportDiagram} />
       <SaveAsDialog file={file} />
       <PrivacyDialog open={privacyOpen} onClose={() => setPrivacyOpen(false)} />
+      <OfflineDialog offline={offline} open={offlineOpen} onClose={() => setOfflineOpen(false)} />
+      {previewDocument !== null && (
+        <MarkdownPreview
+          document={previewDocument}
+          config={state.mermaid}
+          selected={file.selectedBlock}
+          onSelect={file.selectBlock}
+          onClose={() => setPreviewDocument(null)}
+        />
+      )}
     </div>
   );
 }

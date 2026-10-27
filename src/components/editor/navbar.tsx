@@ -1,6 +1,6 @@
 "use client";
 
-import { Contrast, Copy, FolderOpen, Plus, Save, SaveAll, ShieldCheck, Users } from "lucide-react";
+import { CloudDownload, Contrast, Copy, FolderOpen, Library, Plus, Save, SaveAll, Share2, ShieldCheck, Users } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -28,17 +28,19 @@ type MainMenuProps = {
   file: DiagramFile;
   onShare: () => void;
   onLibrary: () => void;
+  onOffline: () => void;
 };
 
-function MainMenu({ newHref, dark, onToggleDark, file, onShare, onLibrary }: MainMenuProps) {
+function MainMenu({ newHref, dark, onToggleDark, file, onShare, onLibrary, onOffline }: MainMenuProps) {
   const entries: MenuEntry[] = [
-    { label: "보관함", icon: <FolderOpen />, onClick: onLibrary },
+    { label: "보관함", icon: <Library />, onClick: onLibrary },
     { label: "새로 만들기", icon: <Plus />, href: newHref, newTab: true },
     { label: "복제", icon: <Copy />, href: typeof window === "undefined" ? "#" : window.location.href, newTab: true },
     { label: "열기", icon: <FolderOpen />, onClick: () => void file.open() },
     { label: "저장", icon: <Save />, onClick: () => void file.save() },
     { label: "다른 이름으로 저장", icon: <SaveAll />, onClick: file.saveAs, sectionEnd: true },
-    { label: "공유", icon: <Users />, onClick: onShare },
+    { label: "공유", icon: <Share2 />, onClick: onShare },
+    { label: "오프라인·앱 설치", icon: <CloudDownload />, onClick: onOffline, sectionEnd: true },
     { label: "Mermaid.js", icon: <MermaidIcon />, href: "https://mermaid.js.org", newTab: true },
     { label: "커뮤니티", icon: <Users />, href: "https://discord.gg/sKeNQX4Wtj", newTab: true },
     { label: "다크 모드", icon: <Contrast />, onClick: onToggleDark, isDarkToggle: true },
@@ -162,7 +164,9 @@ export function Navbar({ isMobile, isViewMode, onViewModeChange, historyOpen, on
             ))
           }
         </Popover>
-        <Button size="sm" variant="ghost" onClick={menu.onLibrary}>보관함</Button>
+        <Button size="sm" variant="ghost" onClick={menu.onLibrary}>
+          <Library className="size-4" /> 보관함
+        </Button>
         <Separator />
         <Toggle pressed={historyOpen} onPressedChange={onHistoryChange} title="기록" aria-label="기록">
           <HistoryIcon />

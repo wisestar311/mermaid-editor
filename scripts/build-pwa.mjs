@@ -52,17 +52,52 @@ const prefix = `mermaid-editor:${base || '/'}:`;
 const cache = prefix + hash.digest('hex').slice(0, 16);
 const urls = files.map((file) => `${base}/${path.relative(root, file).split(path.sep).join('/')}`);
 urls.push(`${base}/`);
+// Install downloads only what the start page references; the rest is cached on use or on request.
+const html = await readFile(path.join(root, 'index.html'), 'utf8');
+const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const referenced = new Set([...html.matchAll(new RegExp(`${escaped}/_next/static/[^"'\\\\\\s)]+`, 'g'))].map((match) => match[0]));
+const core = urls.filter((url) => referenced.has(url) || !url.slice(base.length + 1).startsWith('_next/') && !url.endsWith('.txt'));
 await writeFile(path.join(root, 'sw.js'), `
 const CACHE = ${JSON.stringify(cache)};
 const PREFIX = ${JSON.stringify(prefix)};
 const ROOT = ${JSON.stringify(base + '/')};
 const URLS = ${JSON.stringify(urls)};
+const CORE = ${JSON.stringify(core)};
+const KNOWN = new Set(URLS);
+// Hashed build files keep their name only while their content is unchanged, so they survive updates.
+const IMMUTABLE = ROOT + '_next/static/';
+
+async function addInBatches(cache, urls, onProgress) {
+  for (let i = 0; i < urls.length; i += 12) {
+    await cache.addAll(urls.slice(i, i + 12));
+    onProgress?.(Math.min(i + 12, urls.length));
+  }
+}
+async function missing(cache) {
+  const cached = new Set((await cache.keys()).map((request) => new URL(request.url).pathname));
+  return URLS.filter((url) => !cached.has(url));
+}
+async function reportStatus(client) {
+  const cache = await caches.open(CACHE);
+  const left = await missing(cache);
+  client?.postMessage({ type: 'OFFLINE_STATUS', cached: URLS.length - left.length, total: URLS.length });
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    // Bound concurrent downloads on mobile networks. Activation only follows a complete cache.
     try {
-      for (let i = 0; i < URLS.length; i += 12) await cache.addAll(URLS.slice(i, i + 12));
+      for (const key of await caches.keys()) {
+        if (!key.startsWith(PREFIX) || key === CACHE) continue;
+        const old = await caches.open(key);
+        for (const request of await old.keys()) {
+          const pathname = new URL(request.url).pathname;
+          const response = pathname.startsWith(IMMUTABLE) && KNOWN.has(pathname) && await old.match(request);
+          if (response) await cache.put(pathname, response);
+        }
+      }
+      // Bound concurrent downloads on mobile networks. Activation only follows a complete core.
+      await addInBatches(cache, (await missing(cache)).filter((url) => CORE.includes(url)));
     } catch (error) { await caches.delete(CACHE); throw error; }
   })());
 });
@@ -73,7 +108,31 @@ self.addEventListener('activate', (event) => {
   })());
 });
 self.addEventListener('message', (event) => {
-  if (event.data === 'ACTIVATE_UPDATE') self.skipWaiting();
+  const data = event.data;
+  if (data === 'ACTIVATE_UPDATE') self.skipWaiting();
+  else if (data?.type === 'STATUS') event.waitUntil(reportStatus(event.source));
+  else if (data?.type === 'CACHE_URLS' && Array.isArray(data.urls)) {
+    // Files the page loaded before this worker controlled it.
+    event.waitUntil((async () => {
+      const cache = await caches.open(CACHE);
+      const left = new Set(await missing(cache));
+      await Promise.all(data.urls.filter((url) => left.has(url)).map((url) => cache.add(url).catch(() => {})));
+      await reportStatus(event.source);
+    })());
+  } else if (data?.type === 'CACHE_ALL') {
+    event.waitUntil((async () => {
+      const cache = await caches.open(CACHE);
+      const left = await missing(cache);
+      const done = URLS.length - left.length;
+      try {
+        await addInBatches(cache, left, (count) =>
+          event.source?.postMessage({ type: 'OFFLINE_STATUS', cached: done + count, total: URLS.length }));
+      } catch {
+        event.source?.postMessage({ type: 'OFFLINE_ERROR' });
+      }
+      await reportStatus(event.source);
+    })());
+  }
 });
 self.addEventListener('fetch', (event) => {
   const request = event.request;
@@ -85,8 +144,13 @@ self.addEventListener('fetch', (event) => {
     const cached = await cache.match(request, { ignoreSearch: request.mode === 'navigate' });
     if (cached) return cached;
     if (request.mode === 'navigate') return (await cache.match(ROOT)) || fetch(request);
-    return fetch(request);
+    const response = await fetch(request);
+    if (response.ok && KNOWN.has(url.pathname) && !url.search) {
+      const copy = response.clone();
+      event.waitUntil(cache.put(url.pathname, copy));
+    }
+    return response;
   })());
 });
 `);
-console.log(`PWA: ${urls.length} resources cached; scope ${base || '/'}`);
+console.log(`PWA: ${core.length}/${urls.length} resources precached; scope ${base || '/'}`);

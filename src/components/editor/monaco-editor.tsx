@@ -21,7 +21,7 @@ type MonacoEditorProps = {
 let monacoPromise: Promise<Monaco> | undefined;
 
 // Loads the bundled Monaco build once, with the same workers and mermaid language as mermaid.live.
-function loadMonaco() {
+export function loadMonaco() {
   monacoPromise ??= (async () => {
     self.MonacoEnvironment = {
       getWorker(_workerId, label) {
@@ -168,5 +168,44 @@ export function MonacoEditor({ mode, code, config, dark, revision, error, onChan
     monaco.editor.setModelMarkers(models.code, "mermaid", markers);
   }, [ready, error, code]);
 
+  return <div ref={containerRef} className="h-full w-full" />;
+}
+
+/** Read-only side-by-side comparison of two versions of the code. */
+export function MonacoDiff({ original, modified, dark }: { original: string; modified: string; dark: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    loadMonaco().then((monaco) => {
+      if (disposed) return;
+      monaco.editor.setTheme(dark ? "mermaid-dark" : "mermaid");
+      const models = { original: monaco.editor.createModel(original, "mermaid"), modified: monaco.editor.createModel(modified, "mermaid") };
+      const editor = monaco.editor.createDiffEditor(container, {
+        readOnly: true,
+        originalEditable: false,
+        automaticLayout: true,
+        minimap: { enabled: false },
+        renderSideBySide: container.clientWidth > 600,
+        useInlineViewWhenSpaceIsLimited: true,
+      });
+      editor.setModel(models);
+      cleanup = () => {
+        editor.dispose();
+        models.original.dispose();
+        models.modified.dispose();
+      };
+    }, () => setFailed(true));
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [original, modified, dark]);
+
+  if (failed) return <p className="p-4 text-sm text-red-600">비교 화면을 불러오지 못했습니다.</p>;
   return <div ref={containerRef} className="h-full w-full" />;
 }
